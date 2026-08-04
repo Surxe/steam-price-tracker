@@ -88,6 +88,24 @@ class PriceRecord:
 
 
 @dataclass(frozen=True)
+class SearchResult:
+    """One candidate returned by a store search."""
+
+    app_id: int
+    name: str
+    type: str = ""  # e.g. "app", "dlc", "bundle"
+
+    @classmethod
+    def from_api(cls, item: dict) -> "SearchResult":
+        """Build from a raw Steam ``storesearch`` item."""
+        return cls(
+            app_id=item["id"],
+            name=item["name"],
+            type=item.get("type", ""),
+        )
+
+
+@dataclass(frozen=True)
 class AppInfo:
     """App-specific metadata that rarely changes (name, etc.).
 

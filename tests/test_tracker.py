@@ -35,6 +35,9 @@ class FakeSource(StoreFront):
         self.info_calls += 1
         return AppInfo(app_id=app_id, name=self._names[app_id])
 
+    def search_apps(self, term: str, limit: int = 10):
+        return []  # unused by tracker tests
+
 
 ARK = PriceOverview(
     currency="USD", initial=4499, final=4499,

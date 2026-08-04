@@ -7,8 +7,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
+from typing import List
+
 from .exceptions import PriceUnavailableError, SteamAPIError
-from .models import AppInfo, PriceOverview
+from .models import AppInfo, PriceOverview, SearchResult
 
 
 class PriceSource(ABC):
@@ -31,8 +33,16 @@ class AppInfoSource(ABC):
         """Return :class:`AppInfo` for ``app_id``."""
 
 
-class StoreFront(PriceSource, AppInfoSource, ABC):
-    """A backend that can serve both prices and app metadata."""
+class AppSearchSource(ABC):
+    """Abstract source that resolves a search term to candidate apps."""
+
+    @abstractmethod
+    def search_apps(self, term: str, limit: int = 10) -> List[SearchResult]:
+        """Return up to ``limit`` candidate apps matching ``term``."""
+
+
+class StoreFront(PriceSource, AppInfoSource, AppSearchSource, ABC):
+    """A backend that can serve prices, app metadata, and search."""
 
 
 class SteamStoreClient(StoreFront):
@@ -43,6 +53,7 @@ class SteamStoreClient(StoreFront):
     """
 
     BASE_URL = "https://store.steampowered.com/api/appdetails"
+    SEARCH_URL = "https://store.steampowered.com/api/storesearch/"
 
     def __init__(
         self,
@@ -89,3 +100,20 @@ class SteamStoreClient(StoreFront):
         if not name:
             raise SteamAPIError(f"No name returned for app {app_id}")
         return AppInfo(app_id=app_id, name=name)
+
+    def search_apps(self, term: str, limit: int = 10) -> List[SearchResult]:
+        query = urlencode({"term": term, "cc": self.country_code, "l": "en"})
+        request = Request(
+            f"{self.SEARCH_URL}?{query}",
+            headers={"User-Agent": self.user_agent},
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (URLError, TimeoutError) as exc:
+            raise SteamAPIError(f"Search failed for {term!r}: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise SteamAPIError(f"Invalid JSON for search {term!r}: {exc}") from exc
+
+        items = payload.get("items", []) or []
+        return [SearchResult.from_api(item) for item in items[:limit]]

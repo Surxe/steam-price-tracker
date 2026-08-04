@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .client import (
     AppInfoSource,
+    AppSearchSource,
     PriceSource,
     SteamStoreClient,
     StoreFront,
@@ -12,7 +13,7 @@ from .exceptions import (
     PriceUnavailableError,
     SteamAPIError,
 )
-from .models import AppInfo, PriceOverview, PriceRecord
+from .models import AppInfo, PriceOverview, PriceRecord, SearchResult
 from .storage import (
     AppInfoStore,
     JsonAppInfoStore,
@@ -26,6 +27,7 @@ __version__ = "0.2.0"
 __all__ = [
     "PriceSource",
     "AppInfoSource",
+    "AppSearchSource",
     "StoreFront",
     "SteamStoreClient",
     "PriceStore",
@@ -35,6 +37,7 @@ __all__ = [
     "PriceOverview",
     "PriceRecord",
     "AppInfo",
+    "SearchResult",
     "PriceTracker",
     "PriceTrackerError",
     "SteamAPIError",

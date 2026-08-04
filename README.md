@@ -10,12 +10,14 @@ The package is split into single-responsibility, injectable collaborators:
 
 | Module         | Responsibility                                                        |
 | -------------- | --------------------------------------------------------------------- |
-| `models.py`    | `PriceOverview`, `PriceRecord`, `AppInfo` — immutable domain data      |
-| `client.py`    | `PriceSource` / `AppInfoSource` / `StoreFront` (ABCs) → `SteamStoreClient` |
+| `models.py`    | `PriceOverview`, `PriceRecord`, `AppInfo`, `SearchResult` — domain data |
+| `client.py`    | `PriceSource` / `AppInfoSource` / `AppSearchSource` / `StoreFront` (ABCs) → `SteamStoreClient` |
 | `storage.py`   | `PriceStore` → `JsonPriceStore`, `AppInfoStore` → `JsonAppInfoStore`   |
 | `tracker.py`   | `PriceTracker` — orchestrates source + stores                          |
+| `search.py`    | search-by-name + Markdown/JSON rendering (CLI)                         |
+| `registry.py`  | programmatic read/edit of `TRACKED_APP_IDS` (CLI)                      |
 | `config.py`    | `TRACKED_APP_IDS`, `STORE_PATH`, `APP_INFO_PATH` — user settings       |
-| `__main__.py`  | CLI                                                                    |
+| `__main__.py`  | price-update CLI                                                       |
 
 The sources and stores are all abstract, so you can drop in a fake for tests,
 another region, or a database-backed store without touching the tracker.
@@ -81,8 +83,29 @@ print(tracker.info_store.get(2399830).name)  # "ARK: Survival Ascended"
 
 ## Adding more apps
 
-Append ids to `TRACKED_APP_IDS` in `steam_price_tracker/config.py`. The name is
-fetched automatically the first time each new app is priced.
+Three ways, easiest first:
+
+**1. The `/add-app` skill (recommended).** From a Claude Code session in this
+repo, run `/add-app <game name>`. It searches Steam, shows you the matches, and
+registers the id you pick. See `.claude/skills/add-app/SKILL.md`.
+
+**2. Search + register CLIs** (what the skill drives):
+
+```bash
+# find candidate app ids by name (Markdown table; --format json for machine use)
+.venv/bin/python -m steam_price_tracker.search "ark survival"
+
+# register a chosen id (idempotent); --name is stored as an inline comment
+.venv/bin/python -m steam_price_tracker.registry add 346110 --name "ARK: Survival Evolved"
+
+# list currently-registered ids
+.venv/bin/python -m steam_price_tracker.registry list
+```
+
+**3. By hand.** Append ids to `TRACKED_APP_IDS` in `steam_price_tracker/config.py`.
+
+In all cases the product name is fetched automatically the first time each new
+app is priced.
 
 ## Tests
 
