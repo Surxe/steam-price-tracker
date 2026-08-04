@@ -43,14 +43,30 @@ time an app is priced, then never re-queried (staleness is acceptable).
 { "2399830": { "name": "ARK: Survival Ascended", "fetched_at": "..." } }
 ```
 
+## Setup
+
+The package runs on the standard library alone, but tests use `pytest`. Create a
+project virtualenv and install the dev dependencies into it:
+
+```bash
+cd /srv/dev/repos/steam-price-tracker
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+```
+
+`.venv/` is gitignored. Use `.venv/bin/python` for everything below (or
+`source .venv/bin/activate` once per shell so `python`/`pytest` resolve there).
+The system Python won't have `pytest` — it blocks `pip` under PEP 668 — so always
+go through the venv for this repo.
+
 ## Usage
 
 ```bash
 # Update every id in config.TRACKED_APP_IDS
-python -m steam_price_tracker
+.venv/bin/python -m steam_price_tracker
 
 # Update specific ids
-python -m steam_price_tracker 2399830 730
+.venv/bin/python -m steam_price_tracker 2399830 730
 ```
 
 ```python
@@ -68,10 +84,18 @@ print(tracker.info_store.get(2399830).name)  # "ARK: Survival Ascended"
 Append ids to `TRACKED_APP_IDS` in `steam_price_tracker/config.py`. The name is
 fetched automatically the first time each new app is priced.
 
+## Tests
+
+```bash
+.venv/bin/python -m pytest
+```
+
+The tests use in-memory fakes and temp files, so they hit neither the network
+nor the real `data/` stores.
+
 ## Notes
 
-- Uses only the Python standard library (`urllib`) — no dependencies.
+- Uses only the Python standard library (`urllib`) — no runtime dependencies.
 - The Steam endpoint is undocumented and rate-limited (~200 req / 5 min / IP).
 - Apps with no US price (free / unreleased / region-locked) raise
   `PriceUnavailableError` and are skipped in batch updates.
-- Tests target `pytest` (`pip install pytest`).
