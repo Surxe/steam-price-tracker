@@ -1,35 +1,49 @@
-"""Orchestration: fetch prices from a source and persist them to a store."""
+"""Orchestration: fetch prices/metadata from a source and persist them."""
 from __future__ import annotations
 
 from typing import Dict, Iterable, List
 
-from .client import PriceSource, SteamStoreClient
+from .client import SteamStoreClient, StoreFront
 from .exceptions import PriceTrackerError
 from .models import PriceRecord
-from .storage import JsonPriceStore, PriceStore
+from .storage import (
+    AppInfoStore,
+    JsonAppInfoStore,
+    JsonPriceStore,
+    PriceStore,
+)
 
 
 class PriceTracker:
-    """Ties a :class:`PriceSource` to a :class:`PriceStore`.
+    """Ties a :class:`StoreFront` source to price and app-info stores.
 
-    Both collaborators are injected, so the tracker is trivial to test with
+    All collaborators are injected, so the tracker is trivial to test with
     fakes and open to new sources (e.g. a different region) or stores (e.g. a
     database) without modification.
     """
 
     def __init__(
         self,
-        source: PriceSource | None = None,
+        source: StoreFront | None = None,
         store: PriceStore | None = None,
+        info_store: AppInfoStore | None = None,
     ) -> None:
         self.source = source or SteamStoreClient(country_code="us")
         self.store = store or JsonPriceStore()
+        self.info_store = info_store or JsonAppInfoStore()
 
     def update(self, app_id: int) -> PriceRecord:
-        """Fetch the current price for one app and persist it."""
+        """Fetch the current price for one app and persist it under today's date.
+
+        The first time an app is priced, its metadata (name, ...) is fetched and
+        stored too. Price comes first, so an app with no price never triggers a
+        metadata fetch. Metadata is never re-queried and its fetch is
+        best-effort — staleness or absence is acceptable.
+        """
         price = self.source.fetch_price(app_id)
         record = PriceRecord(app_id=app_id, price=price)
         self.store.save(record)
+        self._ensure_app_info(app_id)
         return record
 
     def update_many(self, app_ids: Iterable[int]) -> Dict[int, PriceRecord]:
@@ -42,6 +56,20 @@ class PriceTracker:
             except PriceTrackerError as exc:
                 errors.append(f"  app {app_id}: {exc}")
         if errors:
-            # Surface failures but keep whatever succeeded.
             print("Some apps could not be updated:\n" + "\n".join(errors))
         return results
+
+    def _ensure_app_info(self, app_id: int) -> None:
+        """Fetch and store app metadata only if it has never been stored.
+
+        Best-effort: a metadata fetch failure is reported but never fails an
+        otherwise-successful price update.
+        """
+        if self.info_store.has(app_id):
+            return
+        try:
+            info = self.source.fetch_app_info(app_id)
+        except PriceTrackerError as exc:
+            print(f"  app {app_id}: could not fetch metadata: {exc}")
+            return
+        self.info_store.save(info)

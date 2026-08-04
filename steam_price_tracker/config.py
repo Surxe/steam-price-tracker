@@ -9,5 +9,6 @@ TRACKED_APP_IDS: list[int] = [
     2399830,
 ]
 
-# Where the JSON price store lives, relative to the repo root.
-STORE_PATH = "data/prices.json"
+# Where the JSON stores live, relative to the repo root.
+STORE_PATH = "data/prices.json"       # price history, keyed by app id -> date
+APP_INFO_PATH = "data/apps.json"      # app metadata (name, ...), keyed by app id

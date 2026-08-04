@@ -1,8 +1,12 @@
-"""Domain models for Steam price data."""
+"""Domain models for Steam price and app data."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
@@ -52,25 +56,56 @@ class PriceOverview:
 
 @dataclass(frozen=True)
 class PriceRecord:
-    """A timestamped price snapshot for a single app, ready for storage."""
+    """A timestamped price snapshot for a single app.
+
+    In storage these are keyed by :pyattr:`date` within each app id so that a
+    history builds up over time for later analysis.
+    """
 
     app_id: int
     price: PriceOverview
-    fetched_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    fetched_at: str = field(default_factory=_utcnow_iso)
 
-    def to_dict(self) -> dict:
+    @property
+    def date(self) -> str:
+        """Calendar date (``YYYY-MM-DD``) the price was fetched, in UTC."""
+        return self.fetched_at[:10]
+
+    def to_entry(self) -> dict:
+        """The per-date value stored under ``app_id -> date`` (no redundant id)."""
         return {
-            "app_id": self.app_id,
             "fetched_at": self.fetched_at,
             "price_overview": self.price.to_dict(),
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "PriceRecord":
+    def from_entry(cls, app_id: int, entry: dict) -> "PriceRecord":
         return cls(
-            app_id=data["app_id"],
-            price=PriceOverview.from_api(data["price_overview"]),
+            app_id=app_id,
+            price=PriceOverview.from_api(entry["price_overview"]),
+            fetched_at=entry["fetched_at"],
+        )
+
+
+@dataclass(frozen=True)
+class AppInfo:
+    """App-specific metadata that rarely changes (name, etc.).
+
+    Fetched once per app and allowed to go stale — it is never re-queried once
+    stored.
+    """
+
+    app_id: int
+    name: str
+    fetched_at: str = field(default_factory=_utcnow_iso)
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "fetched_at": self.fetched_at}
+
+    @classmethod
+    def from_dict(cls, app_id: int, data: dict) -> "AppInfo":
+        return cls(
+            app_id=app_id,
+            name=data["name"],
             fetched_at=data["fetched_at"],
         )

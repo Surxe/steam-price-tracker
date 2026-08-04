@@ -1,4 +1,4 @@
-"""HTTP client for Steam's storefront price API."""
+"""HTTP client for Steam's storefront API."""
 from __future__ import annotations
 
 import json
@@ -8,11 +8,11 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 from .exceptions import PriceUnavailableError, SteamAPIError
-from .models import PriceOverview
+from .models import AppInfo, PriceOverview
 
 
 class PriceSource(ABC):
-    """Abstract price source. Swap implementations for testing or new backends."""
+    """Abstract source of current prices."""
 
     @abstractmethod
     def fetch_price(self, app_id: int) -> PriceOverview:
@@ -23,8 +23,20 @@ class PriceSource(ABC):
         """
 
 
-class SteamStoreClient(PriceSource):
-    """Fetches US pricing from Steam's undocumented storefront JSON endpoint.
+class AppInfoSource(ABC):
+    """Abstract source of app-specific metadata (name, etc.)."""
+
+    @abstractmethod
+    def fetch_app_info(self, app_id: int) -> AppInfo:
+        """Return :class:`AppInfo` for ``app_id``."""
+
+
+class StoreFront(PriceSource, AppInfoSource, ABC):
+    """A backend that can serve both prices and app metadata."""
+
+
+class SteamStoreClient(StoreFront):
+    """Fetches US data from Steam's undocumented storefront JSON endpoint.
 
     The endpoint requires no API key. ``country_code`` is fixed to ``us`` by
     default so all stored prices share a single currency (USD).
@@ -42,19 +54,12 @@ class SteamStoreClient(PriceSource):
         self.timeout = timeout
         self.user_agent = user_agent
 
-    def _build_url(self, app_id: int) -> str:
+    def _request(self, app_id: int, filters: str) -> dict:
         query = urlencode(
-            {
-                "appids": app_id,
-                "cc": self.country_code,
-                "filters": "price_overview",
-            }
+            {"appids": app_id, "cc": self.country_code, "filters": filters}
         )
-        return f"{self.BASE_URL}?{query}"
-
-    def fetch_price(self, app_id: int) -> PriceOverview:
         request = Request(
-            self._build_url(app_id),
+            f"{self.BASE_URL}?{query}",
             headers={"User-Agent": self.user_agent},
         )
         try:
@@ -65,17 +70,22 @@ class SteamStoreClient(PriceSource):
         except json.JSONDecodeError as exc:
             raise SteamAPIError(f"Invalid JSON for app {app_id}: {exc}") from exc
 
-        return self._parse(app_id, payload)
-
-    @staticmethod
-    def _parse(app_id: int, payload: dict) -> PriceOverview:
         entry = payload.get(str(app_id))
         if not entry or not entry.get("success"):
             raise SteamAPIError(f"Steam reported failure for app {app_id}")
+        return entry.get("data", {})
 
-        overview = entry.get("data", {}).get("price_overview")
+    def fetch_price(self, app_id: int) -> PriceOverview:
+        data = self._request(app_id, filters="price_overview")
+        overview = data.get("price_overview")
         if not overview:
             # success=True but no price => free / unreleased / region-locked
             raise PriceUnavailableError(app_id)
-
         return PriceOverview.from_api(overview)
+
+    def fetch_app_info(self, app_id: int) -> AppInfo:
+        data = self._request(app_id, filters="basic")
+        name = data.get("name")
+        if not name:
+            raise SteamAPIError(f"No name returned for app {app_id}")
+        return AppInfo(app_id=app_id, name=name)
