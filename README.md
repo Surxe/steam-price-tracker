@@ -233,14 +233,57 @@ journalctl --user -u steam-price-refresh.service -n 20
 
 Notes:
 
-- `WantedBy=default.target` in the user manager fires at login; `Type=oneshot`
-  runs once and exits.
 - The `ping` guard handles the network not being up yet at login. Prices land in
-  `data/prices.json` under today's date (a second login the same day just
+  `data/prices.json` under today's date (a second run the same day just
   overwrites that day's entry).
 - The repo is group-writable by `developers` (setgid), so any user in that group
   can run the tracker and write to `data/`. Files that user creates are owned by
   them but stay group `developers`.
+
+### When exactly does it run?
+
+The trigger is subtler than "on login." `WantedBy=default.target` ties the
+refresh to your **user session manager** (`systemd --user`) reaching
+`default.target`. Without [lingering](#lingering) that manager **starts when you
+go from zero sessions to one**, and **stops when your last session ends**. So the
+`Type=oneshot` refresh fires exactly once each time your user session manager
+(re)starts — not at boot, and not when an existing session merely wakes up.
+
+Concretely:
+
+| Event | Runs? | Why |
+| ----- | ----- | --- |
+| Cold boot → your first login | ✅ | 0→1 session starts `systemd --user` → `default.target` |
+| Reboot → login | ✅ | same as cold boot |
+| Full **logout**, then log back in | ✅ | last session ended stopped the manager; new login restarts it |
+| **Resume from suspend** (sleep to RAM) | ❌ | your session never ended — the manager kept running |
+| **Resume from hibernate** (sleep to disk) | ❌ | session is restored, not recreated |
+| **Unlock** screen / screensaver off | ❌ | no new session |
+| Log in a **2nd** time while already logged in elsewhere | ❌ | manager already running; `default.target` isn't re-reached |
+| SSH / console login (when you had no other session) | ✅ | any session type starts the user manager |
+
+Mental model: **it runs on a fresh login from a logged-out state (boot, reboot,
+or after a full logout) — not on resume, unlock, or an additional concurrent
+session.** The common surprise is sleep/wake: that keeps your session alive, so
+the refresh does **not** re-run.
+
+Check the last run and its time:
+
+```bash
+systemctl --user status steam-price-refresh.service   # look for "Deactivated successfully" + timestamp
+journalctl --user -u steam-price-refresh.service -n 20
+```
+
+<a id="lingering"></a>
+**Lingering changes this.** If `loginctl enable-linger $USER` is set, `systemd
+--user` starts at **boot** and stays up until shutdown regardless of logins — so
+the refresh runs **once at boot** and **not** on subsequent logins. This service
+assumes lingering is **off** (the default), giving the per-login behavior above.
+
+**Want it on resume-from-sleep too?** That's a separate trigger — a small
+user service that watches logind's `PrepareForSleep` D-Bus signal (a `gdbus
+monitor` loop), or a `systemd --user` timer for periodic refreshes independent of
+sessions. Ask if you want either wired up.
 
 ## Notes
 
