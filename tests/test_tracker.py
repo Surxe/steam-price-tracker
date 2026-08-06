@@ -19,13 +19,18 @@ from steam_price_tracker.client import StoreFront
 
 
 class FakeAlerter(Alerter):
-    """Records alerts instead of delivering them."""
+    """Records each dispatched batch instead of delivering it."""
 
     def __init__(self):
-        self.sent: list[PriceAlert] = []
+        self.batches: list[list[PriceAlert]] = []
 
-    def send(self, alert: PriceAlert) -> None:
-        self.sent.append(alert)
+    def send(self, alerts) -> None:
+        self.batches.append(list(alerts))
+
+    @property
+    def sent(self) -> list[PriceAlert]:
+        """Flattened alerts across all batches."""
+        return [a for batch in self.batches for a in batch]
 
 
 class FakeSource(StoreFront):
@@ -123,7 +128,7 @@ def test_alert_fires_at_or_below_threshold(tmp_path: Path):
     # ARK is $44.99; threshold $44.99 -> "at or below" should fire.
     tracker = _alert_tracker(tmp_path, source, {2399830: 44.99}, alerter)
 
-    tracker.update(2399830)
+    tracker.update_many([2399830])
 
     assert len(alerter.sent) == 1
     alert = alerter.sent[0]
@@ -138,7 +143,7 @@ def test_no_alert_above_threshold(tmp_path: Path):
     alerter = FakeAlerter()
     tracker = _alert_tracker(tmp_path, source, {2399830: 30.00}, alerter)
 
-    tracker.update(2399830)
+    tracker.update_many([2399830])
 
     assert alerter.sent == []
 
@@ -148,6 +153,26 @@ def test_no_alert_without_threshold(tmp_path: Path):
     alerter = FakeAlerter()
     tracker = _alert_tracker(tmp_path, source, {}, alerter)
 
-    tracker.update(2399830)
+    tracker.update_many([2399830])
 
     assert alerter.sent == []
+
+
+def test_alerts_dispatched_as_one_batch(tmp_path: Path):
+    prices = {
+        2399830: ARK,
+        346110: PriceOverview("USD", 999, 999, 0, "$9.99"),
+    }
+    names = {2399830: "ARK: Survival Ascended", 346110: "ARK: Survival Evolved"}
+    source = FakeSource(prices, names)
+    alerter = FakeAlerter()
+    # Both below their thresholds.
+    tracker = _alert_tracker(
+        tmp_path, source, {2399830: 50.0, 346110: 15.0}, alerter
+    )
+
+    tracker.update_many([2399830, 346110])
+
+    # One dispatch (one email) carrying both alerts.
+    assert len(alerter.batches) == 1
+    assert {a.app_id for a in alerter.batches[0]} == {2399830, 346110}

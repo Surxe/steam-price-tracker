@@ -126,10 +126,53 @@ registry (or supplied when adding an app):
 .venv/bin/python -m steam_price_tracker.registry add 2399830 --name "ARK: Survival Ascended" --threshold 30
 ```
 
-Delivery is a swappable strategy (`Alerter`). Today the only implementation is
-`ConsoleAlerter`, which prints the alert — under the login systemd service that
-lands in the journal. Wiring up email later is just a new `Alerter` subclass
-passed to `PriceTracker(alerter=...)`; nothing else changes.
+Delivery is a swappable strategy (`Alerter`). `ConsoleAlerter` prints every
+alert (into the journal under the login service); `EmailAlerter` sends email (see
+below); `CompositeAlerter` runs several at once. Alerts fire as a **batch** per
+refresh, so a whole run's alerts arrive as one message rather than one-per-app.
+
+## Email alerts
+
+When SMTP credentials are present, a refresh sends **one digest email** listing
+every app at/below threshold, from a Gmail account via an **App Password**. To
+avoid spamming (the refresh runs on every login), email is **deduped to once per
+app per UTC day** — the last-emailed date is tracked in
+`data/alert_state.json`. Console alerts are not deduped.
+
+### One-time: create a Gmail App Password
+
+1. On the sending account (`surxe.developer@gmail.com`), enable **2-Step
+   Verification** (required for App Passwords).
+2. Google Account → Security → **App passwords** → generate one (app: "Mail") and
+   copy the 16 characters (shown once).
+
+### Provide credentials via environment (never committed)
+
+Email turns on only when **both** of these are set; presence of the creds is the
+enable switch. Recipient defaults to `EMAIL_TO` in `config.py`
+(`eethansur@gmail.com`).
+
+```
+STEAM_TRACKER_SMTP_USER=surxe.developer@gmail.com   # also the From address
+STEAM_TRACKER_SMTP_PASSWORD=xxxxxxxxxxxxxxxx         # the 16-char App Password
+STEAM_TRACKER_EMAIL_TO=eethansur@gmail.com           # optional override
+```
+
+Non-secret SMTP settings (`smtp.gmail.com:587`, STARTTLS) live in `config.py`.
+Keep these vars out of the repo — `*.env` is gitignored, and the real file lives
+in the running user's `~/.config` (see the login-service section).
+
+### Validate the credentials
+
+```bash
+set -a; . ~/.config/steam-price-tracker/smtp.env; set +a
+.venv/bin/python -m steam_price_tracker --test-email
+```
+
+Sends a canned alert to the recipient (bypassing dedup). On failure the SMTP
+error prints — an auth rejection means the App Password or 2-Step Verification
+needs attention. Adding email later for a new channel is just another `Alerter`
+subclass passed to `PriceTracker(alerter=...)`.
 
 ## Tests
 
@@ -156,11 +199,25 @@ After=graphical-session.target
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/dev/repos/steam-price-tracker
+# SMTP credentials for email alerts (see "Email alerts"). Optional: omit the
+# line if you only want console/journal alerts. `-` = tolerate a missing file.
+EnvironmentFile=-%h/.config/steam-price-tracker/smtp.env
 # Wait for the network, then update every id in TRACKED_APP_IDS.
 ExecStart=/bin/bash -lc 'until ping -c1 -W1 store.steampowered.com >/dev/null 2>&1; do sleep 2; done; exec .venv/bin/python -m steam_price_tracker'
 
 [Install]
 WantedBy=default.target
+```
+
+For email alerts, create the referenced env file (owned by this user, secret):
+
+```bash
+mkdir -p ~/.config/steam-price-tracker
+cat > ~/.config/steam-price-tracker/smtp.env <<'EOF'
+STEAM_TRACKER_SMTP_USER=surxe.developer@gmail.com
+STEAM_TRACKER_SMTP_PASSWORD=xxxxxxxxxxxxxxxx
+EOF
+chmod 600 ~/.config/steam-price-tracker/smtp.env
 ```
 
 Enable it (runs on every subsequent login; `--now` also runs it immediately):

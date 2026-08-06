@@ -73,8 +73,35 @@ def test_edited_config_still_imports(tmp_path: Path):
 
 
 # ------------------------------ thresholds ------------------------------- #
+# A synthetic config with an EMPTY threshold dict, so these tests are
+# deterministic regardless of what the real config.py currently declares.
+_SYNTHETIC_CONFIG = '''\
+from __future__ import annotations
+
+TRACKED_APP_IDS: list[int] = [
+    2399830,
+]
+
+STORE_PATH = "data/prices.json"
+APP_INFO_PATH = "data/apps.json"
+ALERT_STATE_PATH = "data/alert_state.json"
+
+ALERT_THRESHOLDS: dict[int, float] = {}
+
+EMAIL_TO = "eethansur@gmail.com"
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+'''
+
+
+def _empty_threshold_config(tmp_path: Path) -> Path:
+    dst = tmp_path / "config.py"
+    dst.write_text(_SYNTHETIC_CONFIG, encoding="utf-8")
+    return dst
+
+
 def test_set_threshold_from_empty(tmp_path: Path):
-    cfg = _temp_config(tmp_path)
+    cfg = _empty_threshold_config(tmp_path)
     assert registry.read_alert_thresholds(cfg) == {}
     prev = registry.set_alert_threshold(2399830, 30.0, "ARK: Survival Ascended", cfg)
     assert prev is None
@@ -83,7 +110,7 @@ def test_set_threshold_from_empty(tmp_path: Path):
 
 
 def test_set_threshold_updates_existing(tmp_path: Path):
-    cfg = _temp_config(tmp_path)
+    cfg = _empty_threshold_config(tmp_path)
     registry.set_alert_threshold(2399830, 30.0, config_path=cfg)
     prev = registry.set_alert_threshold(2399830, 25.0, config_path=cfg)
     assert prev == 30.0
@@ -93,7 +120,7 @@ def test_set_threshold_updates_existing(tmp_path: Path):
 def test_thresholds_config_still_imports(tmp_path: Path):
     import importlib.util
 
-    cfg = _temp_config(tmp_path)
+    cfg = _empty_threshold_config(tmp_path)
     registry.set_alert_threshold(2399830, 30.0, "ARK: Survival Ascended", cfg)
     registry.set_alert_threshold(346110, 12.5, "ARK: Survival Evolved", cfg)
     spec = importlib.util.spec_from_file_location("cfg_thr", cfg)

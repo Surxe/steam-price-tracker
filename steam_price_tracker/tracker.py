@@ -53,20 +53,32 @@ class PriceTracker:
         record = PriceRecord(app_id=app_id, price=price)
         self.store.save(record)
         self._ensure_app_info(app_id)
-        self._maybe_alert(record)
         return record
 
     def update_many(self, app_ids: Iterable[int]) -> Dict[int, PriceRecord]:
-        """Update several apps, collecting per-app failures instead of aborting."""
+        """Update several apps, then dispatch all fired alerts as one batch.
+
+        Per-app failures are collected rather than aborting the run. Alerts are
+        evaluated across the whole run and handed to the alerter once, so a
+        channel like email can aggregate them into a single message.
+        """
         results: Dict[int, PriceRecord] = {}
+        alerts: List[PriceAlert] = []
         errors: List[str] = []
         for app_id in app_ids:
             try:
-                results[app_id] = self.update(app_id)
+                record = self.update(app_id)
             except PriceTrackerError as exc:
                 errors.append(f"  app {app_id}: {exc}")
+                continue
+            results[app_id] = record
+            alert = self._evaluate_alert(record)
+            if alert is not None:
+                alerts.append(alert)
         if errors:
             print("Some apps could not be updated:\n" + "\n".join(errors))
+        if alerts:
+            self.alerter.send(alerts)
         return results
 
     def _ensure_app_info(self, app_id: int) -> None:
@@ -84,16 +96,18 @@ class PriceTracker:
             return
         self.info_store.save(info)
 
-    def _maybe_alert(self, record: PriceRecord) -> None:
-        """Fire an alert if the app has a threshold and the price is at/below it."""
+    def _evaluate_alert(self, record: PriceRecord) -> Optional[PriceAlert]:
+        """Return an alert if the app has a threshold and the price is at/below it.
+
+        Pure: no side effects. Dispatch is the caller's job (batched per run).
+        """
         threshold = self.thresholds.get(record.app_id)
         if threshold is None or record.price.final_amount > threshold:
-            return
+            return None
         info = self.info_store.get(record.app_id)
-        alert = PriceAlert(
+        return PriceAlert(
             app_id=record.app_id,
             price=record.price,
             threshold=threshold,
             name=info.name if info else None,
         )
-        self.alerter.send(alert)

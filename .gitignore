@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# steam-price-tracker: never commit SMTP credentials / env files
+*.env

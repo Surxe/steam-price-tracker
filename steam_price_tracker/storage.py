@@ -139,3 +139,43 @@ class JsonAppInfoStore(AppInfoStore):
         raw = self._file.load()
         raw[str(info.app_id)] = info.to_dict()
         self._file.write(raw)
+
+
+# --------------------------------------------------------------------------- #
+# Alert delivery state (dedup)
+# --------------------------------------------------------------------------- #
+class AlertStateStore(ABC):
+    """Abstract record of when each app was last alerted-on, for dedup."""
+
+    @abstractmethod
+    def last_emailed(self, app_id: int) -> Optional[str]:
+        """Return the last date (``YYYY-MM-DD``) an email fired for ``app_id``."""
+
+    @abstractmethod
+    def mark_emailed(self, app_id: int, date: str) -> None:
+        """Record that an email fired for ``app_id`` on ``date``."""
+
+
+class JsonAlertStateStore(AlertStateStore):
+    """Stores last-emailed dates in a single JSON file, keyed by app id.
+
+    File shape::
+
+        {"2399830": {"last_emailed": "2026-08-06"}}
+    """
+
+    def __init__(self, path: str | Path = "data/alert_state.json") -> None:
+        self._file = _JsonFile(path)
+
+    @property
+    def path(self) -> Path:
+        return self._file.path
+
+    def last_emailed(self, app_id: int) -> Optional[str]:
+        entry = self._file.load().get(str(app_id))
+        return entry.get("last_emailed") if entry else None
+
+    def mark_emailed(self, app_id: int, date: str) -> None:
+        raw = self._file.load()
+        raw[str(app_id)] = {"last_emailed": date}
+        self._file.write(raw)
