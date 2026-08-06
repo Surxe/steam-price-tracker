@@ -30,10 +30,19 @@ do not reimplement search or config editing inline.
    top hit — the user confirms. (Note `type`: `app` is a game/software; `dlc`,
    `bundle`, `music` etc. may not be what they want.)
 
-3. **Ask about a price alert (optional).** After they pick, ask whether they want
-   a price-alert threshold for this app, in USD — e.g. "alert me when it's at or
-   below $30". This per-app threshold is the whole point of using this over a
-   Steam wishlist. It is optional; if they decline, skip it.
+3. **Ask about a price alert (optional).** After they pick, share the app's
+   **SteamDB price-history page** so they can review historical lows and pick a
+   sensible target before deciding:
+
+   ```
+   https://steamdb.info/app/<app_id>/
+   ```
+
+   Post that link in chat (e.g. for ARK: `https://steamdb.info/app/2399830/`). Do
+   NOT fetch or scrape the page — just provide the link for the user to open.
+   Then ask whether they want a price-alert threshold for this app, in USD — e.g.
+   "alert me when it's at or below $30". This per-app threshold is the whole point
+   of using this over a Steam wishlist. It is optional; if they decline, skip it.
 
 4. **Register the confirmed choice.** Register it, passing the exact product name
    so it is stored as an inline comment. Include `--threshold <usd>` only if the
