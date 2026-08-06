@@ -9,6 +9,16 @@
         "final_formatted": "$44.99",
         "initial": 4499
       }
+    },
+    "2026-08-06": {
+      "fetched_at": "2026-08-06T04:36:56.788380+00:00",
+      "price_overview": {
+        "currency": "USD",
+        "discount_percent": 0,
+        "final": 4499,
+        "final_formatted": "$44.99",
+        "initial": 4499
+      }
     }
   }
 }

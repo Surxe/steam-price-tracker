@@ -30,18 +30,34 @@ do not reimplement search or config editing inline.
    top hit — the user confirms. (Note `type`: `app` is a game/software; `dlc`,
    `bundle`, `music` etc. may not be what they want.)
 
-3. **Register the confirmed choice.** Once the user picks, register it, passing
-   the exact product name so it is stored as an inline comment:
+3. **Ask about a price alert (optional).** After they pick, ask whether they want
+   a price-alert threshold for this app, in USD — e.g. "alert me when it's at or
+   below $30". This per-app threshold is the whole point of using this over a
+   Steam wishlist. It is optional; if they decline, skip it.
+
+4. **Register the confirmed choice.** Register it, passing the exact product name
+   so it is stored as an inline comment. Include `--threshold <usd>` only if the
+   user gave one:
 
    ```bash
+   # without an alert
    .venv/bin/python -m steam_price_tracker.registry add <app_id> --name "<full product name>"
+
+   # with an alert threshold in USD
+   .venv/bin/python -m steam_price_tracker.registry add <app_id> --name "<full product name>" --threshold <usd>
    ```
 
-   This appends to `TRACKED_APP_IDS` in `steam_price_tracker/config.py`. It is
-   idempotent: if the id is already present it reports "already registered" and
-   changes nothing. Report the outcome to the user.
+   This appends to `TRACKED_APP_IDS` (and, if given, `ALERT_THRESHOLDS`) in
+   `steam_price_tracker/config.py`. It is idempotent: if the id is already present
+   it reports "already registered" and changes nothing. Report the outcome. The
+   alert fires on price refresh whenever the current price is at or below the
+   threshold. To add or change a threshold later, use:
 
-4. **Offer a first price fetch (optional).** Ask whether to pull an initial
+   ```bash
+   .venv/bin/python -m steam_price_tracker.registry set-threshold <app_id> <usd>
+   ```
+
+5. **Offer a first price fetch (optional).** Ask whether to pull an initial
    price now. If yes:
 
    ```bash
@@ -56,6 +72,6 @@ do not reimplement search or config editing inline.
 - The Steam search endpoint is US-scoped (`cc=us`), matching the tracker's
   US-only pricing.
 - If the user already gave an exact app id (not a name), skip search and go
-  straight to step 3.
+  straight to the alert question (step 3) and registration (step 4).
 - For machine-readable output (e.g. to script a pick), add `--format json` to
   the search command.

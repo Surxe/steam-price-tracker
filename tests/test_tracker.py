@@ -7,13 +7,25 @@ import pytest
 
 from steam_price_tracker import (
     AppInfo,
+    Alerter,
     JsonAppInfoStore,
     JsonPriceStore,
+    PriceAlert,
     PriceOverview,
     PriceTracker,
     PriceUnavailableError,
 )
 from steam_price_tracker.client import StoreFront
+
+
+class FakeAlerter(Alerter):
+    """Records alerts instead of delivering them."""
+
+    def __init__(self):
+        self.sent: list[PriceAlert] = []
+
+    def send(self, alert: PriceAlert) -> None:
+        self.sent.append(alert)
 
 
 class FakeSource(StoreFront):
@@ -92,3 +104,50 @@ def test_unavailable_price_raises(tmp_path: Path):
     tracker = make_tracker(tmp_path, source)
     with pytest.raises(PriceUnavailableError):
         tracker.update(2399830)
+
+
+# --------------------------------- alerts -------------------------------- #
+def _alert_tracker(tmp_path: Path, source: FakeSource, thresholds, alerter):
+    return PriceTracker(
+        source=source,
+        store=JsonPriceStore(tmp_path / "prices.json"),
+        info_store=JsonAppInfoStore(tmp_path / "apps.json"),
+        alerter=alerter,
+        thresholds=thresholds,
+    )
+
+
+def test_alert_fires_at_or_below_threshold(tmp_path: Path):
+    source = FakeSource({2399830: ARK}, {2399830: "ARK: Survival Ascended"})
+    alerter = FakeAlerter()
+    # ARK is $44.99; threshold $44.99 -> "at or below" should fire.
+    tracker = _alert_tracker(tmp_path, source, {2399830: 44.99}, alerter)
+
+    tracker.update(2399830)
+
+    assert len(alerter.sent) == 1
+    alert = alerter.sent[0]
+    assert alert.app_id == 2399830
+    assert alert.threshold == 44.99
+    assert alert.name == "ARK: Survival Ascended"
+    assert "ARK: Survival Ascended" in alert.message
+
+
+def test_no_alert_above_threshold(tmp_path: Path):
+    source = FakeSource({2399830: ARK}, {2399830: "ARK: Survival Ascended"})
+    alerter = FakeAlerter()
+    tracker = _alert_tracker(tmp_path, source, {2399830: 30.00}, alerter)
+
+    tracker.update(2399830)
+
+    assert alerter.sent == []
+
+
+def test_no_alert_without_threshold(tmp_path: Path):
+    source = FakeSource({2399830: ARK}, {2399830: "ARK: Survival Ascended"})
+    alerter = FakeAlerter()
+    tracker = _alert_tracker(tmp_path, source, {}, alerter)
+
+    tracker.update(2399830)
+
+    assert alerter.sent == []

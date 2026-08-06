@@ -70,3 +70,33 @@ def test_edited_config_still_imports(tmp_path: Path):
     spec.loader.exec_module(module)
     assert module.TRACKED_APP_IDS == [2399830, 346110]
     assert module.STORE_PATH == "data/prices.json"
+
+
+# ------------------------------ thresholds ------------------------------- #
+def test_set_threshold_from_empty(tmp_path: Path):
+    cfg = _temp_config(tmp_path)
+    assert registry.read_alert_thresholds(cfg) == {}
+    prev = registry.set_alert_threshold(2399830, 30.0, "ARK: Survival Ascended", cfg)
+    assert prev is None
+    assert registry.read_alert_thresholds(cfg) == {2399830: 30.0}
+    assert "2399830: 30.0,  # ARK: Survival Ascended" in cfg.read_text()
+
+
+def test_set_threshold_updates_existing(tmp_path: Path):
+    cfg = _temp_config(tmp_path)
+    registry.set_alert_threshold(2399830, 30.0, config_path=cfg)
+    prev = registry.set_alert_threshold(2399830, 25.0, config_path=cfg)
+    assert prev == 30.0
+    assert registry.read_alert_thresholds(cfg) == {2399830: 25.0}
+
+
+def test_thresholds_config_still_imports(tmp_path: Path):
+    import importlib.util
+
+    cfg = _temp_config(tmp_path)
+    registry.set_alert_threshold(2399830, 30.0, "ARK: Survival Ascended", cfg)
+    registry.set_alert_threshold(346110, 12.5, "ARK: Survival Evolved", cfg)
+    spec = importlib.util.spec_from_file_location("cfg_thr", cfg)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.ALERT_THRESHOLDS == {2399830: 30.0, 346110: 12.5}

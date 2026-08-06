@@ -13,7 +13,8 @@ The package is split into single-responsibility, injectable collaborators:
 | `models.py`    | `PriceOverview`, `PriceRecord`, `AppInfo`, `SearchResult` — domain data |
 | `client.py`    | `PriceSource` / `AppInfoSource` / `AppSearchSource` / `StoreFront` (ABCs) → `SteamStoreClient` |
 | `storage.py`   | `PriceStore` → `JsonPriceStore`, `AppInfoStore` → `JsonAppInfoStore`   |
-| `tracker.py`   | `PriceTracker` — orchestrates source + stores                          |
+| `tracker.py`   | `PriceTracker` — orchestrates source + stores, fires alerts            |
+| `alerts.py`    | `Alerter` (ABC) → `ConsoleAlerter` — alert delivery strategy           |
 | `search.py`    | search-by-name + Markdown/JSON rendering (CLI)                         |
 | `registry.py`  | programmatic read/edit of `TRACKED_APP_IDS` (CLI)                      |
 | `config.py`    | `TRACKED_APP_IDS`, `STORE_PATH`, `APP_INFO_PATH` — user settings       |
@@ -106,6 +107,29 @@ registers the id you pick. See `.claude/skills/add-app/SKILL.md`.
 
 In all cases the product name is fetched automatically the first time each new
 app is priced.
+
+## Price alerts
+
+Each app can have an optional **USD price-alert threshold**. On every refresh, if
+an app's current price is **at or below** its threshold, an alert fires. This
+per-app threshold is the reason to use this over a Steam wishlist, which has no
+per-item target price.
+
+Thresholds live in `ALERT_THRESHOLDS` in `config.py` and are managed via the
+registry (or supplied when adding an app):
+
+```bash
+# set / change a threshold (USD)
+.venv/bin/python -m steam_price_tracker.registry set-threshold 2399830 30
+
+# or when registering a new app
+.venv/bin/python -m steam_price_tracker.registry add 2399830 --name "ARK: Survival Ascended" --threshold 30
+```
+
+Delivery is a swappable strategy (`Alerter`). Today the only implementation is
+`ConsoleAlerter`, which prints the alert — under the login systemd service that
+lands in the journal. Wiring up email later is just a new `Alerter` subclass
+passed to `PriceTracker(alerter=...)`; nothing else changes.
 
 ## Tests
 

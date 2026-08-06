@@ -106,6 +106,27 @@ class SearchResult:
 
 
 @dataclass(frozen=True)
+class PriceAlert:
+    """A fired price alert: an app's current price met its configured threshold.
+
+    ``threshold`` is in USD; the alert fires when the price is at or below it.
+    """
+
+    app_id: int
+    price: PriceOverview
+    threshold: float
+    name: str | None = None
+
+    @property
+    def message(self) -> str:
+        who = self.name or f"app {self.app_id}"
+        return (
+            f"[PRICE ALERT] {who}: {self.price.final_formatted} "
+            f"is at or below your ${self.threshold:.2f} threshold"
+        )
+
+
+@dataclass(frozen=True)
 class AppInfo:
     """App-specific metadata that rarely changes (name, etc.).
 
