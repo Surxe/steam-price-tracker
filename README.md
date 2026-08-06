@@ -116,6 +116,51 @@ app is priced.
 The tests use in-memory fakes and temp files, so they hit neither the network
 nor the real `data/` stores.
 
+## Auto-refresh prices on login
+
+A `systemd` **user** service refreshes prices whenever the user logs in. Because
+the service must live under a specific user's home (`~/.config/systemd/user/`),
+it is installed per-user by that user — it is not part of the repo.
+
+Create `~/.config/systemd/user/steam-price-refresh.service`:
+
+```ini
+[Unit]
+Description=Refresh Steam prices on login
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/dev/repos/steam-price-tracker
+# Wait for the network, then update every id in TRACKED_APP_IDS.
+ExecStart=/bin/bash -lc 'until ping -c1 -W1 store.steampowered.com >/dev/null 2>&1; do sleep 2; done; exec .venv/bin/python -m steam_price_tracker'
+
+[Install]
+WantedBy=default.target
+```
+
+Enable it (runs on every subsequent login; `--now` also runs it immediately):
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now steam-price-refresh.service
+
+# check the last run
+systemctl --user status steam-price-refresh.service
+journalctl --user -u steam-price-refresh.service -n 20
+```
+
+Notes:
+
+- `WantedBy=default.target` in the user manager fires at login; `Type=oneshot`
+  runs once and exits.
+- The `ping` guard handles the network not being up yet at login. Prices land in
+  `data/prices.json` under today's date (a second login the same day just
+  overwrites that day's entry).
+- The repo is group-writable by `developers` (setgid), so any user in that group
+  can run the tracker and write to `data/`. Files that user creates are owned by
+  them but stay group `developers`.
+
 ## Notes
 
 - Uses only the Python standard library (`urllib`) — no runtime dependencies.
