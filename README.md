@@ -280,10 +280,73 @@ journalctl --user -u steam-price-refresh.service -n 20
 the refresh runs **once at boot** and **not** on subsequent logins. This service
 assumes lingering is **off** (the default), giving the per-login behavior above.
 
-**Want it on resume-from-sleep too?** That's a separate trigger — a small
-user service that watches logind's `PrepareForSleep` D-Bus signal (a `gdbus
-monitor` loop), or a `systemd --user` timer for periodic refreshes independent of
-sessions. Ask if you want either wired up.
+**Want it on resume-from-sleep too?** See the next section.
+
+### Also refresh on resume from sleep
+
+The login unit above does **not** fire when you wake from suspend/hibernate (your
+session never ended — see the table). To also refresh on resume, add a second
+**user** service that watches logind's `PrepareForSleep` D-Bus signal and, on the
+resume edge, re-triggers the *same* oneshot refresh unit. No refresh logic is
+duplicated — it just calls `systemctl --user start steam-price-refresh.service`,
+so the network guard and SMTP `EnvironmentFile` from that unit still apply.
+
+The watcher script lives in the repo at
+[`scripts/on-resume-refresh.sh`](scripts/on-resume-refresh.sh). Create
+`~/.config/systemd/user/steam-price-refresh-resume.service`:
+
+```ini
+[Unit]
+Description=Refresh Steam prices on resume from sleep
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/srv/dev/repos/steam-price-tracker/scripts/on-resume-refresh.sh
+# The watcher is a long-lived monitor loop; restart it if gdbus/the bus drops.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Enable it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now steam-price-refresh-resume.service
+
+# confirm the watcher is running (it stays "active (running)")
+systemctl --user status steam-price-refresh-resume.service
+```
+
+How it behaves:
+
+| Event | Runs? | Why |
+| ----- | ----- | --- |
+| Resume from **suspend** (sleep to RAM) | ✅ | `PrepareForSleep(false)` edge triggers the oneshot |
+| Resume from **hibernate** (sleep to disk) | ✅ | same signal on resume |
+| Going **into** sleep | ❌ | that's the `PrepareForSleep(true)` edge — ignored |
+| Fresh login (boot/reboot/logout→login) | ✅ (via the login unit) | the two services are complementary |
+
+Together, the two units cover every wake path: the login unit handles fresh
+logins, this one handles resume-from-sleep. A refresh that runs twice close in
+time is harmless — same-day price entries just overwrite, and email stays deduped
+to once per app per day.
+
+Verify it end-to-end by suspending and waking:
+
+```bash
+journalctl --user -u steam-price-refresh.service -n 20   # should show a run dated to the wake
+journalctl --user -u steam-price-refresh-resume.service  # the watcher's own log
+```
+
+> **Note (lingering):** if `loginctl enable-linger` is ever turned on, the watcher
+> starts at boot and keeps running across logins — which is fine and still catches
+> every resume. With lingering off (the default here) it starts on your first
+> login and dies with your last session, so a wake only refreshes while you're
+> logged in (which is the only time it matters).
 
 ## Notes
 
