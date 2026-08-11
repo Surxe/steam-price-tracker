@@ -7,6 +7,11 @@ from __future__ import annotations
 # Steam app ids to track. 2399830 = ARK: Survival Ascended.
 TRACKED_APP_IDS: list[int] = [
     2399830,
+    1771300,  # Kingdom Come: Deliverance II
+    1903340,  # Clair Obscur: Expedition 33
+    1203620,  # Enshrouded
+    1295660,  # Sid Meier's Civilization VII
+    2246340,  # Monster Hunter Wilds
 ]
 
 # Where the JSON stores live, relative to the repo root.
@@ -18,7 +23,12 @@ ALERT_STATE_PATH = "data/alert_state.json"  # last-emailed date per app (dedup)
 # app's current price is at or below its threshold. Apps absent here are not
 # alerted. Managed via `python -m steam_price_tracker.registry`.
 ALERT_THRESHOLDS: dict[int, float] = {
-    2399830: 50.0,  # ARK: Survival Ascended
+    2399830: 20.0,  # ARK: Survival Ascended
+    1771300: 25.0,  # Kingdom Come: Deliverance II
+    1903340: 25.0,  # Clair Obscur: Expedition 33
+    1203620: 13.0,  # Enshrouded
+    1295660: 25.0,  # Sid Meier's Civilization VII
+    2246340: 20.0,  # Monster Hunter Wilds
 }
 
 # Email alert delivery (Gmail SMTP + App Password). Non-secret settings only.
