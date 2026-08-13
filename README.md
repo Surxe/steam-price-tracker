@@ -202,8 +202,10 @@ WorkingDirectory=/srv/dev/repos/steam-price-tracker
 # SMTP credentials for email alerts (see "Email alerts"). Optional: omit the
 # line if you only want console/journal alerts. `-` = tolerate a missing file.
 EnvironmentFile=-%h/.config/steam-price-tracker/smtp.env
-# Wait for the network, then update every id in TRACKED_APP_IDS.
-ExecStart=/bin/bash -lc 'until ping -c1 -W1 store.steampowered.com >/dev/null 2>&1; do sleep 2; done; exec .venv/bin/python -m steam_price_tracker'
+# Wait for the network, update every id in TRACKED_APP_IDS, then commit the
+# resulting data/ changes locally so the working tree never accumulates an
+# uncommitted (and easily-clobbered) diff. See scripts/refresh-and-commit.sh.
+ExecStart=/srv/dev/repos/steam-price-tracker/scripts/refresh-and-commit.sh
 
 [Install]
 WantedBy=default.target
@@ -233,9 +235,14 @@ journalctl --user -u steam-price-refresh.service -n 20
 
 Notes:
 
-- The `ping` guard handles the network not being up yet at login. Prices land in
-  `data/prices.json` under today's date (a second run the same day just
-  overwrites that day's entry).
+- The `ping` guard (now inside `scripts/refresh-and-commit.sh`) handles the
+  network not being up yet at login. Prices land in `data/prices.json` under
+  today's date (a second run the same day just overwrites that day's entry).
+- After a successful refresh the script commits the `data/` changes **locally**
+  (never pushes, never needs auth), if anything changed — so each run leaves the
+  tree clean instead of letting an uncommitted diff pile up where a later
+  checkout/stash/rebase could silently drop a captured price. The resume watcher
+  reuses the same unit, so resume refreshes get committed too.
 - The repo is group-writable by `developers` (setgid), so any user in that group
   can run the tracker and write to `data/`. Files that user creates are owned by
   them but stay group `developers`.
