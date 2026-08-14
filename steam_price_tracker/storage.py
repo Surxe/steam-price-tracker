@@ -1,12 +1,12 @@
-"""Persistence layer for price history and app metadata."""
+"""Persistence layer for app metadata and email-alert dedup state."""
 from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
-from .models import AppInfo, PriceRecord
+from .models import AppInfo
 
 
 class _JsonFile:
@@ -32,66 +32,6 @@ class _JsonFile:
             json.dump(raw, fh, indent=2, sort_keys=True)
             fh.write("\n")
         tmp.replace(self.path)
-
-
-# --------------------------------------------------------------------------- #
-# Prices
-# --------------------------------------------------------------------------- #
-class PriceStore(ABC):
-    """Abstract store of price history, keyed by app id then date."""
-
-    @abstractmethod
-    def save(self, record: PriceRecord) -> None:
-        """Persist ``record`` under its app id and date (same-day overwrites)."""
-
-    @abstractmethod
-    def get_history(self, app_id: int) -> Dict[str, PriceRecord]:
-        """Return every dated record for ``app_id``, keyed by date."""
-
-    @abstractmethod
-    def get_latest(self, app_id: int) -> Optional[PriceRecord]:
-        """Return the most recent record for ``app_id`` or ``None``."""
-
-
-class JsonPriceStore(PriceStore):
-    """Stores price history in a single JSON file.
-
-    File shape::
-
-        {
-          "2399830": {
-            "2026-08-04": {"fetched_at": "...", "price_overview": {...}}
-          }
-        }
-    """
-
-    def __init__(self, path: str | Path = "data/prices.json") -> None:
-        self._file = _JsonFile(path)
-
-    @property
-    def path(self) -> Path:
-        return self._file.path
-
-    def save(self, record: PriceRecord) -> None:
-        raw = self._file.load()
-        app_history = raw.setdefault(str(record.app_id), {})
-        app_history[record.date] = record.to_entry()
-        self._file.write(raw)
-
-    def get_history(self, app_id: int) -> Dict[str, PriceRecord]:
-        raw = self._file.load()
-        app_history = raw.get(str(app_id), {})
-        return {
-            date: PriceRecord.from_entry(app_id, entry)
-            for date, entry in app_history.items()
-        }
-
-    def get_latest(self, app_id: int) -> Optional[PriceRecord]:
-        history = self.get_history(app_id)
-        if not history:
-            return None
-        latest_date = max(history)  # ISO dates sort lexicographically
-        return history[latest_date]
 
 
 # --------------------------------------------------------------------------- #

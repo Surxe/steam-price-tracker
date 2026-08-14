@@ -9,7 +9,6 @@ from steam_price_tracker import (
     AppInfo,
     Alerter,
     JsonAppInfoStore,
-    JsonPriceStore,
     PriceAlert,
     PriceOverview,
     PriceTracker,
@@ -65,20 +64,17 @@ ARK = PriceOverview(
 def make_tracker(tmp_path: Path, source: FakeSource) -> PriceTracker:
     return PriceTracker(
         source=source,
-        store=JsonPriceStore(tmp_path / "prices.json"),
         info_store=JsonAppInfoStore(tmp_path / "apps.json"),
     )
 
 
-def test_price_is_keyed_by_date(tmp_path: Path):
+def test_update_returns_current_price(tmp_path: Path):
     source = FakeSource({2399830: ARK}, {2399830: "ARK: Survival Ascended"})
     tracker = make_tracker(tmp_path, source)
 
-    record = tracker.update(2399830)
+    price = tracker.update(2399830)
 
-    history = tracker.store.get_history(2399830)
-    assert list(history) == [record.date]           # keyed by date
-    assert history[record.date].price == ARK
+    assert price == ARK
 
 
 def test_app_info_fetched_once_then_cached(tmp_path: Path):
@@ -101,7 +97,7 @@ def test_update_many_skips_failures(tmp_path: Path):
     results = tracker.update_many([2399830, 111111])
 
     assert set(results) == {2399830}
-    assert tracker.store.get_latest(111111) is None
+    assert 111111 not in results
 
 
 def test_unavailable_price_raises(tmp_path: Path):
@@ -115,7 +111,6 @@ def test_unavailable_price_raises(tmp_path: Path):
 def _alert_tracker(tmp_path: Path, source: FakeSource, thresholds, alerter):
     return PriceTracker(
         source=source,
-        store=JsonPriceStore(tmp_path / "prices.json"),
         info_store=JsonAppInfoStore(tmp_path / "apps.json"),
         alerter=alerter,
         thresholds=thresholds,

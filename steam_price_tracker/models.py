@@ -55,39 +55,6 @@ class PriceOverview:
 
 
 @dataclass(frozen=True)
-class PriceRecord:
-    """A timestamped price snapshot for a single app.
-
-    In storage these are keyed by :pyattr:`date` within each app id so that a
-    history builds up over time for later analysis.
-    """
-
-    app_id: int
-    price: PriceOverview
-    fetched_at: str = field(default_factory=_utcnow_iso)
-
-    @property
-    def date(self) -> str:
-        """Calendar date (``YYYY-MM-DD``) the price was fetched, in UTC."""
-        return self.fetched_at[:10]
-
-    def to_entry(self) -> dict:
-        """The per-date value stored under ``app_id -> date`` (no redundant id)."""
-        return {
-            "fetched_at": self.fetched_at,
-            "price_overview": self.price.to_dict(),
-        }
-
-    @classmethod
-    def from_entry(cls, app_id: int, entry: dict) -> "PriceRecord":
-        return cls(
-            app_id=app_id,
-            price=PriceOverview.from_api(entry["price_overview"]),
-            fetched_at=entry["fetched_at"],
-        )
-
-
-@dataclass(frozen=True)
 class SearchResult:
     """One candidate returned by a store search."""
 
