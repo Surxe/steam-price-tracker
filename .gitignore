@@ -221,3 +221,7 @@ __marimo__/
 
 # steam-price-tracker: never commit SMTP credentials / env files
 *.env
+
+# steam-price-tracker: local price/app data + the personal tracked-apps list.
+# These are per-machine runtime state, not source — kept out of git.
+data/

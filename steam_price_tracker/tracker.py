@@ -36,9 +36,9 @@ class PriceTracker:
         self.store = store or JsonPriceStore()
         self.info_store = info_store or JsonAppInfoStore()
         self.alerter = alerter or ConsoleAlerter()
-        # Per-app USD thresholds; defaults to whatever config declares.
+        # Per-app USD thresholds; defaults to the tracked-apps file.
         self.thresholds: Dict[int, float] = dict(
-            config.ALERT_THRESHOLDS if thresholds is None else thresholds
+            config.alert_thresholds() if thresholds is None else thresholds
         )
 
     def update(self, app_id: int) -> PriceRecord:

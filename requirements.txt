@@ -1,0 +1,3 @@
+# Runtime dependencies.
+# Configuration (env vars, CLI args, and generated docs) is managed by OptionsConfig.
+optionsconfig>=0.4.0

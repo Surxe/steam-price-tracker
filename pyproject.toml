@@ -1,0 +1,6 @@
+[tool.optionsconfig]
+# Settings schema lives in the package; OptionsConfig loads it from here so the
+# CLI, environment/.env resolution, and doc generation all share one source.
+schema_module = "steam_price_tracker.options_schema"
+env_example_path = ".env.example"
+readme_path = "README.md"
