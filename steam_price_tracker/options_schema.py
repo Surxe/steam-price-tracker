@@ -14,14 +14,6 @@ from __future__ import annotations
 
 OPTIONS_SCHEMA = {
     # ---------------------------- Storage ------------------------------- #
-    "STORE_PATH": {
-        "env": "STEAM_TRACKER_STORE_PATH",
-        "arg": "--store-path",
-        "type": str,
-        "default": "data/prices.json",
-        "section": "Storage",
-        "help": "JSON file for the per-day price history, keyed by app id then date.",
-    },
     "APP_INFO_PATH": {
         "env": "STEAM_TRACKER_APP_INFO_PATH",
         "arg": "--app-info-path",

@@ -1,4 +1,4 @@
-"""Steam price tracker: fetch US Steam prices and persist them as JSON."""
+"""Steam price tracker: fetch US Steam prices and email alerts for price drops."""
 from __future__ import annotations
 
 from .alerts import (
@@ -20,14 +20,12 @@ from .exceptions import (
     PriceUnavailableError,
     SteamAPIError,
 )
-from .models import AppInfo, PriceAlert, PriceOverview, PriceRecord, SearchResult
+from .models import AppInfo, PriceAlert, PriceOverview, SearchResult
 from .storage import (
     AlertStateStore,
     AppInfoStore,
     JsonAlertStateStore,
     JsonAppInfoStore,
-    JsonPriceStore,
-    PriceStore,
 )
 from .tracker import PriceTracker
 
@@ -39,12 +37,9 @@ __all__ = [
     "AppSearchSource",
     "StoreFront",
     "SteamStoreClient",
-    "PriceStore",
-    "JsonPriceStore",
     "AppInfoStore",
     "JsonAppInfoStore",
     "PriceOverview",
-    "PriceRecord",
     "AppInfo",
     "SearchResult",
     "PriceAlert",

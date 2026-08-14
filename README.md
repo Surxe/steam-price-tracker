@@ -1,8 +1,10 @@
 # Steam Price Tracker
 
-Fetches **US** pricing for Steam apps from Steam's storefront JSON endpoint and
-builds a **per-day price history** keyed by app id, plus a separate store of
-app metadata (product name).
+Fetches **US** pricing for Steam apps from Steam's storefront JSON endpoint and,
+on each run, emails an alert for any tracked app at or below its configured price
+threshold. Prices are checked live per run — no price history is kept; the only
+things stored are app metadata (product name) and the last-emailed date used to
+dedup alerts.
 
 ## Design
 
@@ -10,10 +12,10 @@ The package is split into single-responsibility, injectable collaborators:
 
 | Module         | Responsibility                                                        |
 | -------------- | --------------------------------------------------------------------- |
-| `models.py`    | `PriceOverview`, `PriceRecord`, `AppInfo`, `SearchResult` — domain data |
+| `models.py`    | `PriceOverview`, `AppInfo`, `SearchResult`, `PriceAlert` — domain data |
 | `client.py`    | `PriceSource` / `AppInfoSource` / `AppSearchSource` / `StoreFront` (ABCs) → `SteamStoreClient` |
-| `storage.py`   | `PriceStore` → `JsonPriceStore`, `AppInfoStore` → `JsonAppInfoStore`   |
-| `tracker.py`   | `PriceTracker` — orchestrates source + stores, fires alerts            |
+| `storage.py`   | `AppInfoStore` → `JsonAppInfoStore`, `AlertStateStore` → `JsonAlertStateStore` |
+| `tracker.py`   | `PriceTracker` — orchestrates source + metadata store, fires alerts    |
 | `alerts.py`    | `Alerter` (ABC) → `ConsoleAlerter` — alert delivery strategy           |
 | `search.py`    | search-by-name + Markdown/JSON rendering (CLI)                         |
 | `registry.py`  | programmatic read/edit of the tracked-apps file (CLI)                  |
@@ -31,25 +33,19 @@ another region, or a database-backed store without touching the tracker.
 
 ## Data layout
 
-**`data/prices.json`** — price history, keyed by app id → date (`YYYY-MM-DD`,
-UTC). One entry per calendar day; a same-day re-run overwrites that day.
-
-```json
-{
-  "2399830": {
-    "2026-08-04": {
-      "fetched_at": "2026-08-04T23:09:07+00:00",
-      "price_overview": { "currency": "USD", "final": 4499, "final_formatted": "$44.99", ... }
-    }
-  }
-}
-```
-
 **`data/apps.json`** — app metadata, keyed by app id. Fetched once the first
 time an app is priced, then never re-queried (staleness is acceptable).
 
 ```json
 { "2399830": { "name": "ARK: Survival Ascended", "fetched_at": "..." } }
+```
+
+**`data/alert_state.json`** — the last date (UTC) an alert email fired for each
+app, so a refresh emails at most once per app per day (see [Email
+alerts](#email-alerts)).
+
+```json
+{ "2399830": { "last_emailed": "2026-08-06" } }
 ```
 
 **`data/tracked_apps.json`** — the set of tracked apps and their optional USD
@@ -62,8 +58,8 @@ never alert". Edited by the [registry CLI](#adding-more-apps).
 ```
 
 The whole `data/` directory is **gitignored** — it is per-machine runtime state
-(your prices, your tracked list), not source. A fresh clone starts with no
-tracked apps; add them with the registry (below).
+(your metadata cache, your tracked list, your alert-dedup state), not source. A
+fresh clone starts with no tracked apps; add them with the registry (below).
 
 ## Setup
 
@@ -96,9 +92,8 @@ go through the venv for this repo.
 from steam_price_tracker import PriceTracker
 
 tracker = PriceTracker()
-record = tracker.update(2399830)          # fetches metadata too, if new
-print(record.price.final_amount)          # 44.99
-print(tracker.store.get_history(2399830)) # {date: PriceRecord, ...}
+price = tracker.update(2399830)              # fetches metadata too, if new
+print(price.final_amount)                    # 44.99
 print(tracker.info_store.get(2399830).name)  # "ARK: Survival Ascended"
 ```
 
@@ -107,9 +102,9 @@ print(tracker.info_store.get(2399830).name)  # "ARK: Survival Ascended"
 Settings are managed with [OptionsConfig](https://github.com/Surxe/OptionsConfig).
 Each setting can be supplied three ways, highest priority first:
 
-1. a **CLI flag** — e.g. `--store-path data/prices.json`;
+1. a **CLI flag** — e.g. `--app-info-path data/apps.json`;
 2. an **environment variable** (or a line in an untracked `.env` at the repo
-   root) — e.g. `STEAM_TRACKER_STORE_PATH=data/prices.json`;
+   root) — e.g. `STEAM_TRACKER_APP_INFO_PATH=data/apps.json`;
 3. otherwise the **default** below.
 
 Copy `.env.example` to `.env` and edit it to set values via the environment.
@@ -127,14 +122,10 @@ them with:
 > refresh service loads them via its unit's `EnvironmentFile`. Secrets stay in
 > the gitignored `smtp.env`. Edit the tracked list through the `/add-app` skill
 > (it targets the my-system source), then commit there and re-run `install.sh`.
-> `data/` in this repo holds only generated price/metadata output.
+> `data/` in this repo holds only the app-metadata cache and alert-dedup state.
 
 <!-- BEGIN_GENERATED_OPTIONS -->
 #### Storage
-
-* **STEAM_TRACKER_STORE_PATH** - JSON file for the per-day price history, keyed by app id then date.
-  - Default: `"data/prices.json"`
-  - Command line: `--store-path`
 
 * **STEAM_TRACKER_APP_INFO_PATH** - JSON file for app metadata (product name), keyed by app id.
   - Default: `"data/apps.json"`

@@ -22,7 +22,7 @@ from .alerts import (
     EphemeralAlertState,
 )
 from .models import PriceAlert, PriceOverview
-from .storage import JsonAlertStateStore, JsonAppInfoStore, JsonPriceStore
+from .storage import JsonAlertStateStore, JsonAppInfoStore
 from .tracker import PriceTracker
 
 
@@ -48,7 +48,7 @@ def _build_alerter(options) -> Alerter:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="steam_price_tracker",
-        description="Fetch US Steam prices and store them as JSON.",
+        description="Fetch US Steam prices and email alerts for price drops.",
     )
     parser.add_argument(
         "app_ids",
@@ -76,16 +76,15 @@ def main(argv: list[str] | None = None) -> int:
 
     app_ids = args.app_ids or config.tracked_app_ids()
     tracker = PriceTracker(
-        store=JsonPriceStore(options.store_path),
         info_store=JsonAppInfoStore(options.app_info_path),
         alerter=_build_alerter(options),
     )
 
     results = tracker.update_many(app_ids)
-    for app_id, record in sorted(results.items()):
+    for app_id, price in sorted(results.items()):
         info = tracker.info_store.get(app_id)
         name = info.name if info else str(app_id)
-        print(f"{app_id} {name}: {record.price.final_formatted} ({record.price.currency})")
+        print(f"{app_id} {name}: {price.final_formatted} ({price.currency})")
 
     # Non-zero exit if nothing succeeded.
     return 0 if results else 1
