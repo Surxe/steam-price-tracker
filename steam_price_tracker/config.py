@@ -1,40 +1,91 @@
-"""User-editable configuration.
+"""Configuration access.
 
-Add more app ids here as the set of tracked games grows.
+Two kinds of configuration meet here:
+
+* **Flat settings** (store paths, SMTP/email) come from an OptionsConfig schema
+  (:mod:`steam_price_tracker.options_schema`), resolved from CLI args, then the
+  environment / ``.env``, then schema defaults. Get them via :func:`get_options`
+  (or seed the cache from parsed CLI args with :func:`load_options`).
+* **Tracked apps + thresholds** are variable-length per-app data, so they live in
+  a JSON file (the "apps file") whose path is the ``APPS_PATH`` option. The
+  registry CLI edits it; readers use :func:`tracked_app_ids` /
+  :func:`alert_thresholds` / :func:`load_tracked_apps`.
+
+An apps-file entry is ``{"name": <str?>, "threshold": <float?>}`` keyed by app id
+(``name`` is a human label; the authoritative name is fetched into the app-info
+store). A missing/``null`` ``threshold`` means "tracked, but never alert".
 """
 from __future__ import annotations
 
-# Steam app ids to track. 2399830 = ARK: Survival Ascended.
-TRACKED_APP_IDS: list[int] = [
-    2399830,
-    1771300,  # Kingdom Come: Deliverance II
-    1903340,  # Clair Obscur: Expedition 33
-    1203620,  # Enshrouded
-    1295660,  # Sid Meier's Civilization VII
-    2246340,  # Monster Hunter Wilds
-]
+import json
+from argparse import Namespace
+from pathlib import Path
+from typing import Dict, List, Optional
 
-# Where the JSON stores live, relative to the repo root.
-STORE_PATH = "data/prices.json"       # price history, keyed by app id -> date
-APP_INFO_PATH = "data/apps.json"      # app metadata (name, ...), keyed by app id
-ALERT_STATE_PATH = "data/alert_state.json"  # last-emailed date per app (dedup)
+from optionsconfig import Options, init_options, logger
 
-# Per-app price-alert thresholds, in USD. An alert fires on refresh when an
-# app's current price is at or below its threshold. Apps absent here are not
-# alerted. Managed via `python -m steam_price_tracker.registry`.
-ALERT_THRESHOLDS: dict[int, float] = {
-    2399830: 20.0,  # ARK: Survival Ascended
-    1771300: 25.0,  # Kingdom Come: Deliverance II
-    1903340: 25.0,  # Clair Obscur: Expedition 33
-    1203620: 13.0,  # Enshrouded
-    1295660: 25.0,  # Sid Meier's Civilization VII
-    2246340: 20.0,  # Monster Hunter Wilds
-}
+# OptionsConfig logs option resolution via loguru; that is noise for this CLI,
+# which speaks through print(). Drop loguru's default handler at import.
+logger.remove()
 
-# Email alert delivery (Gmail SMTP + App Password). Non-secret settings only.
-# The sender address and 16-char App Password are supplied at runtime via the
-# STEAM_TRACKER_SMTP_USER / STEAM_TRACKER_SMTP_PASSWORD environment variables
-# (never committed). Email is enabled only when both are present.
-EMAIL_TO = "eethansur@gmail.com"      # recipient (override: STEAM_TRACKER_EMAIL_TO)
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587                       # STARTTLS
+_OPTIONS: Optional[Options] = None
+
+
+def load_options(args: Namespace | None = None) -> Options:
+    """Resolve and cache settings (args > env/.env > defaults).
+
+    Call once from the CLI with parsed ``args`` to fold in command-line
+    overrides; later ``get_options()`` calls return the same cached object.
+    Passing ``args`` re-resolves (last call wins).
+    """
+    global _OPTIONS
+    if _OPTIONS is None or args is not None:
+        _OPTIONS = init_options(args=args, setup_logger=False)
+    return _OPTIONS
+
+
+def get_options() -> Options:
+    """Return the resolved settings, loading from env/defaults on first use."""
+    return load_options()
+
+
+# --------------------------------------------------------------------------- #
+# Tracked-apps file (ids + thresholds)
+# --------------------------------------------------------------------------- #
+def apps_path(path: str | Path | None = None) -> Path:
+    """Resolve the apps-file path (explicit override, else the APPS_PATH option)."""
+    return Path(path) if path is not None else Path(get_options().apps_path)
+
+
+def load_tracked_apps(path: str | Path | None = None) -> Dict[int, dict]:
+    """Return the apps file as ``{app_id: entry}`` in file order (``{}`` if absent)."""
+    file = apps_path(path)
+    if not file.exists():
+        return {}
+    raw = json.loads(file.read_text(encoding="utf-8"))
+    return {int(app_id): entry for app_id, entry in raw.items()}
+
+
+def save_tracked_apps(apps: Dict[int, dict], path: str | Path | None = None) -> None:
+    """Write ``apps`` back to the apps file (atomic replace, insertion order kept)."""
+    file = apps_path(path)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    payload = {str(app_id): entry for app_id, entry in apps.items()}
+    tmp = file.with_suffix(file.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(file)
+
+
+def tracked_app_ids(path: str | Path | None = None) -> List[int]:
+    """Return the tracked app ids, in file order."""
+    return list(load_tracked_apps(path).keys())
+
+
+def alert_thresholds(path: str | Path | None = None) -> Dict[int, float]:
+    """Return ``{app_id: threshold}`` for apps that declare a USD threshold."""
+    thresholds: Dict[int, float] = {}
+    for app_id, entry in load_tracked_apps(path).items():
+        threshold = entry.get("threshold")
+        if threshold is not None:
+            thresholds[app_id] = float(threshold)
+    return thresholds

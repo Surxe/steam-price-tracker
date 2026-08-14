@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Callable, Optional, Sequence
 
-from . import config
 from .models import PriceAlert
 from .storage import AlertStateStore
 
@@ -70,24 +69,29 @@ class EmailConfig:
     to_addr: str
 
     @classmethod
-    def from_env(cls, env: Optional[dict] = None) -> Optional["EmailConfig"]:
-        """Build from environment, or ``None`` if credentials are not both set.
+    def from_options(cls, options=None) -> Optional["EmailConfig"]:
+        """Build from resolved OptionsConfig settings, or ``None`` if disabled.
 
-        Presence of both user and password is the enable switch for email.
+        Presence of both ``smtp_user`` and ``smtp_password`` is the enable switch
+        for email. ``options`` defaults to the shared settings from
+        :func:`steam_price_tracker.config.get_options`.
         """
-        import os
+        if options is None:
+            from . import config
 
-        env = os.environ if env is None else env
-        user = env.get("STEAM_TRACKER_SMTP_USER")
-        password = env.get("STEAM_TRACKER_SMTP_PASSWORD")
-        if not user or not password:
+            options = config.get_options()
+        user = options.smtp_user
+        password = options.smtp_password
+        to_addr = options.email_to
+        # All three are secrets in smtp.env; email is off unless all are present.
+        if not user or not password or not to_addr:
             return None
         return cls(
-            host=config.SMTP_HOST,
-            port=config.SMTP_PORT,
+            host=options.smtp_host,
+            port=options.smtp_port,
             user=user,
             password=password,
-            to_addr=env.get("STEAM_TRACKER_EMAIL_TO", config.EMAIL_TO),
+            to_addr=to_addr,
         )
 
 

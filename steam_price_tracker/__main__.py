@@ -1,14 +1,18 @@
 """CLI: ``python -m steam_price_tracker [app_id ...]``.
 
-With no arguments it updates every id in :data:`config.TRACKED_APP_IDS`.
+With no app ids it updates every id in the tracked-apps file. Storage paths and
+SMTP/email settings are OptionsConfig options: pass them as ``--store-path`` etc.,
+or via ``STEAM_TRACKER_*`` environment variables / a ``.env`` file (run
+``python build.py`` to regenerate ``.env.example`` and the docs from the schema).
 """
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
-from . import __version__
+from optionsconfig import ArgumentWriter
+
+from . import __version__, config
 from .alerts import (
     Alerter,
     CompositeAlerter,
@@ -17,32 +21,31 @@ from .alerts import (
     EmailConfig,
     EphemeralAlertState,
 )
-from .config import ALERT_STATE_PATH, APP_INFO_PATH, STORE_PATH, TRACKED_APP_IDS
 from .models import PriceAlert, PriceOverview
 from .storage import JsonAlertStateStore, JsonAppInfoStore, JsonPriceStore
 from .tracker import PriceTracker
 
 
-def _build_alerter(env: dict | None = None) -> Alerter:
+def _build_alerter(options) -> Alerter:
     """Console alerts always; add email when SMTP credentials are present."""
-    env = os.environ if env is None else env
     console = ConsoleAlerter()
 
-    email_config = EmailConfig.from_env(env)
+    email_config = EmailConfig.from_options(options)
     if email_config is None:
-        # Warn if creds are half-set so misconfiguration is not silent.
-        if env.get("STEAM_TRACKER_SMTP_USER") or env.get("STEAM_TRACKER_SMTP_PASSWORD"):
+        # Warn if email is partially configured so misconfiguration is not silent.
+        if options.smtp_user or options.smtp_password or options.email_to:
             print(
-                "Email disabled: set BOTH STEAM_TRACKER_SMTP_USER and "
-                "STEAM_TRACKER_SMTP_PASSWORD. Using console alerts only."
+                "Email disabled: set STEAM_TRACKER_SMTP_USER, "
+                "STEAM_TRACKER_SMTP_PASSWORD, and STEAM_TRACKER_EMAIL_TO. "
+                "Using console alerts only."
             )
         return console
 
-    email = EmailAlerter(email_config, JsonAlertStateStore(ALERT_STATE_PATH))
+    email = EmailAlerter(email_config, JsonAlertStateStore(options.alert_state_path))
     return CompositeAlerter([console, email])
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="steam_price_tracker",
         description="Fetch US Steam prices and store them as JSON.",
@@ -51,15 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         "app_ids",
         nargs="*",
         type=int,
-        help="Steam app ids to update (default: config.TRACKED_APP_IDS).",
-    )
-    parser.add_argument(
-        "--store", default=STORE_PATH, help=f"price store path (default: {STORE_PATH})."
-    )
-    parser.add_argument(
-        "--app-info-store",
-        default=APP_INFO_PATH,
-        help=f"app metadata store path (default: {APP_INFO_PATH}).",
+        help="Steam app ids to update (default: the tracked-apps file).",
     )
     parser.add_argument(
         "--test-email",
@@ -67,16 +62,23 @@ def main(argv: list[str] | None = None) -> int:
         help="send a canned test alert to validate SMTP credentials, then exit",
     )
     parser.add_argument("--version", action="version", version=__version__)
-    args = parser.parse_args(argv)
+    # Storage / email settings (--store-path, --smtp-*, ...) from the schema.
+    ArgumentWriter().add_arguments(parser)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    options = config.load_options(args)
 
     if args.test_email:
-        return _send_test_email()
+        return _send_test_email(options)
 
-    app_ids = args.app_ids or TRACKED_APP_IDS
+    app_ids = args.app_ids or config.tracked_app_ids()
     tracker = PriceTracker(
-        store=JsonPriceStore(args.store),
-        info_store=JsonAppInfoStore(args.app_info_store),
-        alerter=_build_alerter(),
+        store=JsonPriceStore(options.store_path),
+        info_store=JsonAppInfoStore(options.app_info_path),
+        alerter=_build_alerter(options),
     )
 
     results = tracker.update_many(app_ids)
@@ -89,13 +91,13 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if results else 1
 
 
-def _send_test_email() -> int:
+def _send_test_email(options) -> int:
     """Send a canned alert via SMTP to validate credentials (bypasses dedup)."""
-    email_config = EmailConfig.from_env()
+    email_config = EmailConfig.from_options(options)
     if email_config is None:
         print(
-            "Email is not configured: set STEAM_TRACKER_SMTP_USER and "
-            "STEAM_TRACKER_SMTP_PASSWORD."
+            "Email is not configured: set STEAM_TRACKER_SMTP_USER, "
+            "STEAM_TRACKER_SMTP_PASSWORD, and STEAM_TRACKER_EMAIL_TO."
         )
         return 1
     canned = PriceAlert(

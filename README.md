@@ -16,9 +16,15 @@ The package is split into single-responsibility, injectable collaborators:
 | `tracker.py`   | `PriceTracker` — orchestrates source + stores, fires alerts            |
 | `alerts.py`    | `Alerter` (ABC) → `ConsoleAlerter` — alert delivery strategy           |
 | `search.py`    | search-by-name + Markdown/JSON rendering (CLI)                         |
-| `registry.py`  | programmatic read/edit of `TRACKED_APP_IDS` (CLI)                      |
-| `config.py`    | `TRACKED_APP_IDS`, `STORE_PATH`, `APP_INFO_PATH` — user settings       |
+| `registry.py`  | programmatic read/edit of the tracked-apps file (CLI)                  |
+| `options_schema.py` | the OptionsConfig schema — one typed entry per setting            |
+| `config.py`    | resolves settings (args/env/defaults) + reads the tracked-apps file   |
 | `__main__.py`  | price-update CLI                                                       |
+
+Settings are managed with [OptionsConfig](https://github.com/Surxe/OptionsConfig):
+the schema in `options_schema.py` is the single source of truth for every
+setting, its CLI flag, its `STEAM_TRACKER_*` environment variable, and the
+generated `.env.example` / [Configuration](#configuration) docs.
 
 The sources and stores are all abstract, so you can drop in a fake for tests,
 another region, or a database-backed store without touching the tracker.
@@ -46,10 +52,24 @@ time an app is priced, then never re-queried (staleness is acceptable).
 { "2399830": { "name": "ARK: Survival Ascended", "fetched_at": "..." } }
 ```
 
+**`data/tracked_apps.json`** — the set of tracked apps and their optional USD
+alert thresholds, keyed by app id. `name` is a human label (the authoritative
+name lives in `apps.json`); a missing/`null` `threshold` means "tracked, but
+never alert". Edited by the [registry CLI](#adding-more-apps).
+
+```json
+{ "2399830": { "name": "ARK: Survival Ascended", "threshold": 20.0 } }
+```
+
+The whole `data/` directory is **gitignored** — it is per-machine runtime state
+(your prices, your tracked list), not source. A fresh clone starts with no
+tracked apps; add them with the registry (below).
+
 ## Setup
 
-The package runs on the standard library alone, but tests use `pytest`. Create a
-project virtualenv and install the dev dependencies into it:
+The runtime dependency is [OptionsConfig](https://github.com/Surxe/OptionsConfig)
+(settings management); tests also use `pytest`. Create a project virtualenv and
+install the dev dependencies (which include the runtime ones) into it:
 
 ```bash
 cd /srv/dev/repos/steam-price-tracker
@@ -65,7 +85,7 @@ go through the venv for this repo.
 ## Usage
 
 ```bash
-# Update every id in config.TRACKED_APP_IDS
+# Update every id in the tracked-apps file (data/tracked_apps.json)
 .venv/bin/python -m steam_price_tracker
 
 # Update specific ids
@@ -82,6 +102,80 @@ print(tracker.store.get_history(2399830)) # {date: PriceRecord, ...}
 print(tracker.info_store.get(2399830).name)  # "ARK: Survival Ascended"
 ```
 
+## Configuration
+
+Settings are managed with [OptionsConfig](https://github.com/Surxe/OptionsConfig).
+Each setting can be supplied three ways, highest priority first:
+
+1. a **CLI flag** — e.g. `--store-path data/prices.json`;
+2. an **environment variable** (or a line in an untracked `.env` at the repo
+   root) — e.g. `STEAM_TRACKER_STORE_PATH=data/prices.json`;
+3. otherwise the **default** below.
+
+Copy `.env.example` to `.env` and edit it to set values via the environment.
+The reference below — and `.env.example` — are generated from the schema in
+`steam_price_tracker/options_schema.py`; after editing that schema, regenerate
+them with:
+
+```bash
+.venv/bin/python build.py
+```
+
+> **On this deployment**, the non-secret settings and the tracked-apps file are
+> owned by [my-system](https://github.com/Surxe/my-system) and deployed to
+> `~/.config/steam-price-tracker/` (`options.conf` + `tracked_apps.json`); the
+> refresh service loads them via its unit's `EnvironmentFile`. Secrets stay in
+> the gitignored `smtp.env`. Edit the tracked list through the `/add-app` skill
+> (it targets the my-system source), then commit there and re-run `install.sh`.
+> `data/` in this repo holds only generated price/metadata output.
+
+<!-- BEGIN_GENERATED_OPTIONS -->
+#### Storage
+
+* **STEAM_TRACKER_STORE_PATH** - JSON file for the per-day price history, keyed by app id then date.
+  - Default: `"data/prices.json"`
+  - Command line: `--store-path`
+
+* **STEAM_TRACKER_APP_INFO_PATH** - JSON file for app metadata (product name), keyed by app id.
+  - Default: `"data/apps.json"`
+  - Command line: `--app-info-path`
+
+* **STEAM_TRACKER_ALERT_STATE_PATH** - JSON file recording the last date each app was emailed (email dedup).
+  - Default: `"data/alert_state.json"`
+  - Command line: `--alert-state-path`
+
+* **STEAM_TRACKER_APPS_PATH** - JSON file of tracked apps and their optional USD alert thresholds, keyed by app id. Edited by the registry CLI.
+  - Example: `"data/tracked_apps.json"`
+  - Default: `"data/tracked_apps.json"`
+  - Command line: `--apps-path`
+
+
+#### Email alerts
+
+* **STEAM_TRACKER_EMAIL_TO** - Recipient address for price-alert digest emails. Treated as a secret (a personal address): supply it via the environment / the gitignored smtp.env alongside the SMTP credentials, never a committed file. Required for email — without it (or the SMTP credentials) email stays off and only console alerts are used.
+  - Default: None
+  - Command line: `--email-to`
+
+* **STEAM_TRACKER_SMTP_HOST** - SMTP server host used to send alert emails.
+  - Default: `"smtp.gmail.com"`
+  - Command line: `--smtp-host`
+
+* **STEAM_TRACKER_SMTP_PORT** - SMTP server port (587 = STARTTLS).
+  - Default: `"587"`
+  - Command line: `--smtp-port`
+
+* **STEAM_TRACKER_SMTP_USER** - SMTP account to authenticate as, also the From address. Email is enabled only when SMTP_USER, SMTP_PASSWORD, and EMAIL_TO are all set.
+  - Default: None
+  - Command line: `--smtp-user`
+  - For Gmail this is the sending account; pair it with a 16-character App Password in SMTP_PASSWORD (see the Email alerts section).
+
+* **STEAM_TRACKER_SMTP_PASSWORD** - SMTP password (a Gmail App Password). Keep this out of the repo; supply it via the environment or an untracked .env file.
+  - Default: None
+  - Command line: `--smtp-password`
+
+
+<!-- END_GENERATED_OPTIONS -->
+
 ## Adding more apps
 
 Three ways, easiest first:
@@ -96,14 +190,16 @@ registers the id you pick. See `.claude/skills/add-app/SKILL.md`.
 # find candidate app ids by name (Markdown table; --format json for machine use)
 .venv/bin/python -m steam_price_tracker.search "ark survival"
 
-# register a chosen id (idempotent); --name is stored as an inline comment
+# register a chosen id (idempotent); --name is stored alongside the id
 .venv/bin/python -m steam_price_tracker.registry add 346110 --name "ARK: Survival Evolved"
 
 # list currently-registered ids
 .venv/bin/python -m steam_price_tracker.registry list
 ```
 
-**3. By hand.** Append ids to `TRACKED_APP_IDS` in `steam_price_tracker/config.py`.
+**3. By hand.** Add a key to `data/tracked_apps.json` (created on first
+registry write): `"346110": {"name": "ARK: Survival Evolved", "threshold": 15.0}`.
+`threshold` is optional.
 
 In all cases the product name is fetched automatically the first time each new
 app is priced.
@@ -115,8 +211,8 @@ an app's current price is **at or below** its threshold, an alert fires. This
 per-app threshold is the reason to use this over a Steam wishlist, which has no
 per-item target price.
 
-Thresholds live in `ALERT_THRESHOLDS` in `config.py` and are managed via the
-registry (or supplied when adding an app):
+Thresholds live in the tracked-apps file (`data/tracked_apps.json`) and are
+managed via the registry (or supplied when adding an app):
 
 ```bash
 # set / change a threshold (USD)
@@ -148,19 +244,23 @@ app per UTC day** — the last-emailed date is tracked in
 
 ### Provide credentials via environment (never committed)
 
-Email turns on only when **both** of these are set; presence of the creds is the
-enable switch. Recipient defaults to `EMAIL_TO` in `config.py`
-(`eethansur@gmail.com`).
+`SMTP_USER`, `SMTP_PASSWORD`, and `EMAIL_TO` are all treated as secrets (the
+recipient is a personal address), so they have no committed defaults and are
+supplied via the environment — not a tracked file. Email turns on only when
+**all three** are set; otherwise the tracker just fetches prices and uses console
+alerts.
 
 ```
-STEAM_TRACKER_SMTP_USER=surxe.developer@gmail.com   # also the From address
-STEAM_TRACKER_SMTP_PASSWORD=xxxxxxxxxxxxxxxx         # the 16-char App Password
-STEAM_TRACKER_EMAIL_TO=eethansur@gmail.com           # optional override
+STEAM_TRACKER_SMTP_USER=your.sender@gmail.com        # also the From address
+STEAM_TRACKER_SMTP_PASSWORD=xxxxxxxxxxxxxxxx          # the 16-char App Password
+STEAM_TRACKER_EMAIL_TO=your.recipient@example.com     # alert recipient
 ```
 
-Non-secret SMTP settings (`smtp.gmail.com:587`, STARTTLS) live in `config.py`.
-Keep these vars out of the repo — `*.env` is gitignored, and the real file lives
-in the running user's `~/.config` (see the login-service section).
+Non-secret SMTP settings (`SMTP_HOST`/`SMTP_PORT`, default `smtp.gmail.com:587`
+STARTTLS) have defaults in the schema and rarely need changing. Keep the secret
+vars out of the repo — `*.env` is gitignored, and the real file lives in the
+running user's `~/.config/steam-price-tracker/smtp.env` (deployed by my-system;
+see [Auto-refresh prices on login](#auto-refresh-prices-on-login)).
 
 ### Validate the credentials
 
@@ -185,179 +285,29 @@ nor the real `data/` stores.
 
 ## Auto-refresh prices on login
 
-A `systemd` **user** service refreshes prices whenever the user logs in. Because
-the service must live under a specific user's home (`~/.config/systemd/user/`),
-it is installed per-user by that user — it is not part of the repo.
+This repo is just the tracker. The auto-refresh wiring — a `systemd --user`
+oneshot that runs on login, plus a resume-from-sleep watcher — is owned and
+deployed by [my-system](https://github.com/Surxe/my-system) through its
+`install.sh`, not by this repo. The deployed units live at
+`~/.config/systemd/user/steam-price-refresh{,-resume-watch}.service` and call the
+review-gated wrappers in `~/.local/bin/` (sources:
+`users/ethan/localbin/steam-price-refresh` and `steam-price-resume-watch` in
+my-system). Those wrappers wait for connectivity, then run the CLI below — so
+there is nothing tracker-side to install for auto-refresh.
 
-Create `~/.config/systemd/user/steam-price-refresh.service`:
-
-```ini
-[Unit]
-Description=Refresh Steam prices on login
-After=graphical-session.target
-
-[Service]
-Type=oneshot
-WorkingDirectory=/srv/dev/repos/steam-price-tracker
-# SMTP credentials for email alerts (see "Email alerts"). Optional: omit the
-# line if you only want console/journal alerts. `-` = tolerate a missing file.
-EnvironmentFile=-%h/.config/steam-price-tracker/smtp.env
-# Wait for the network, update every id in TRACKED_APP_IDS, then commit the
-# resulting data/ changes locally so the working tree never accumulates an
-# uncommitted (and easily-clobbered) diff. See scripts/refresh-and-commit.sh.
-ExecStart=/srv/dev/repos/steam-price-tracker/scripts/refresh-and-commit.sh
-
-[Install]
-WantedBy=default.target
-```
-
-For email alerts, create the referenced env file (owned by this user, secret):
+To run a refresh yourself (exactly what the units ultimately call):
 
 ```bash
-mkdir -p ~/.config/steam-price-tracker
-cat > ~/.config/steam-price-tracker/smtp.env <<'EOF'
-STEAM_TRACKER_SMTP_USER=surxe.developer@gmail.com
-STEAM_TRACKER_SMTP_PASSWORD=xxxxxxxxxxxxxxxx
-EOF
-chmod 600 ~/.config/steam-price-tracker/smtp.env
+.venv/bin/python -m steam_price_tracker
 ```
 
-Enable it (runs on every subsequent login; `--now` also runs it immediately):
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now steam-price-refresh.service
-
-# check the last run
-systemctl --user status steam-price-refresh.service
-journalctl --user -u steam-price-refresh.service -n 20
-```
-
-Notes:
-
-- The `ping` guard (now inside `scripts/refresh-and-commit.sh`) handles the
-  network not being up yet at login. Prices land in `data/prices.json` under
-  today's date (a second run the same day just overwrites that day's entry).
-- After a successful refresh the script commits the `data/` changes **locally**
-  (never pushes, never needs auth), if anything changed — so each run leaves the
-  tree clean instead of letting an uncommitted diff pile up where a later
-  checkout/stash/rebase could silently drop a captured price. The resume watcher
-  reuses the same unit, so resume refreshes get committed too.
-- The repo is group-writable by `developers` (setgid), so any user in that group
-  can run the tracker and write to `data/`. Files that user creates are owned by
-  them but stay group `developers`.
-
-### When exactly does it run?
-
-The trigger is subtler than "on login." `WantedBy=default.target` ties the
-refresh to your **user session manager** (`systemd --user`) reaching
-`default.target`. Without [lingering](#lingering) that manager **starts when you
-go from zero sessions to one**, and **stops when your last session ends**. So the
-`Type=oneshot` refresh fires exactly once each time your user session manager
-(re)starts — not at boot, and not when an existing session merely wakes up.
-
-Concretely:
-
-| Event | Runs? | Why |
-| ----- | ----- | --- |
-| Cold boot → your first login | ✅ | 0→1 session starts `systemd --user` → `default.target` |
-| Reboot → login | ✅ | same as cold boot |
-| Full **logout**, then log back in | ✅ | last session ended stopped the manager; new login restarts it |
-| **Resume from suspend** (sleep to RAM) | ❌ | your session never ended — the manager kept running |
-| **Resume from hibernate** (sleep to disk) | ❌ | session is restored, not recreated |
-| **Unlock** screen / screensaver off | ❌ | no new session |
-| Log in a **2nd** time while already logged in elsewhere | ❌ | manager already running; `default.target` isn't re-reached |
-| SSH / console login (when you had no other session) | ✅ | any session type starts the user manager |
-
-Mental model: **it runs on a fresh login from a logged-out state (boot, reboot,
-or after a full logout) — not on resume, unlock, or an additional concurrent
-session.** The common surprise is sleep/wake: that keeps your session alive, so
-the refresh does **not** re-run.
-
-Check the last run and its time:
-
-```bash
-systemctl --user status steam-price-refresh.service   # look for "Deactivated successfully" + timestamp
-journalctl --user -u steam-price-refresh.service -n 20
-```
-
-<a id="lingering"></a>
-**Lingering changes this.** If `loginctl enable-linger $USER` is set, `systemd
---user` starts at **boot** and stays up until shutdown regardless of logins — so
-the refresh runs **once at boot** and **not** on subsequent logins. This service
-assumes lingering is **off** (the default), giving the per-login behavior above.
-
-**Want it on resume-from-sleep too?** See the next section.
-
-### Also refresh on resume from sleep
-
-The login unit above does **not** fire when you wake from suspend/hibernate (your
-session never ended — see the table). To also refresh on resume, add a second
-**user** service that watches logind's `PrepareForSleep` D-Bus signal and, on the
-resume edge, re-triggers the *same* oneshot refresh unit. No refresh logic is
-duplicated — it just calls `systemctl --user start steam-price-refresh.service`,
-so the network guard and SMTP `EnvironmentFile` from that unit still apply.
-
-The watcher script lives in the repo at
-[`scripts/on-resume-refresh.sh`](scripts/on-resume-refresh.sh). Create
-`~/.config/systemd/user/steam-price-refresh-resume.service`:
-
-```ini
-[Unit]
-Description=Refresh Steam prices on resume from sleep
-After=default.target
-
-[Service]
-Type=simple
-ExecStart=/srv/dev/repos/steam-price-tracker/scripts/on-resume-refresh.sh
-# The watcher is a long-lived monitor loop; restart it if gdbus/the bus drops.
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
-
-Enable it:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now steam-price-refresh-resume.service
-
-# confirm the watcher is running (it stays "active (running)")
-systemctl --user status steam-price-refresh-resume.service
-```
-
-How it behaves:
-
-| Event | Runs? | Why |
-| ----- | ----- | --- |
-| Resume from **suspend** (sleep to RAM) | ✅ | `PrepareForSleep(false)` edge triggers the oneshot |
-| Resume from **hibernate** (sleep to disk) | ✅ | same signal on resume |
-| Going **into** sleep | ❌ | that's the `PrepareForSleep(true)` edge — ignored |
-| Fresh login (boot/reboot/logout→login) | ✅ (via the login unit) | the two services are complementary |
-
-Together, the two units cover every wake path: the login unit handles fresh
-logins, this one handles resume-from-sleep. A refresh that runs twice close in
-time is harmless — same-day price entries just overwrite, and email stays deduped
-to once per app per day.
-
-Verify it end-to-end by suspending and waking:
-
-```bash
-journalctl --user -u steam-price-refresh.service -n 20   # should show a run dated to the wake
-journalctl --user -u steam-price-refresh-resume.service  # the watcher's own log
-```
-
-> **Note (lingering):** if `loginctl enable-linger` is ever turned on, the watcher
-> starts at boot and keeps running across logins — which is fine and still catches
-> every resume. With lingering off (the default here) it starts on your first
-> login and dies with your last session, so a wake only refreshes while you're
-> logged in (which is the only time it matters).
+Credentials come from the unit's `EnvironmentFile` (`~/.config/steam-price-tracker/smtp.env`);
+see [Email alerts](#email-alerts).
 
 ## Notes
 
-- Uses only the Python standard library (`urllib`) — no runtime dependencies.
+- Steam access uses only the Python standard library (`urllib`); the sole runtime
+  dependency is `optionsconfig` (settings management).
 - The Steam endpoint is undocumented and rate-limited (~200 req / 5 min / IP).
 - Apps with no US price (free / unreleased / region-locked) raise
   `PriceUnavailableError` and are skipped in batch updates.

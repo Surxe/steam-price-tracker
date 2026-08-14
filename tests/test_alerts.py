@@ -23,7 +23,7 @@ CFG = EmailConfig(
     port=587,
     user="surxe.developer@gmail.com",
     password="app-password-16",
-    to_addr="eethansur@gmail.com",
+    to_addr="alerts@example.com",
 )
 
 ARK_ALERT = PriceAlert(
@@ -87,7 +87,7 @@ def test_email_composes_and_authenticates(tmp_path: Path):
     assert len(smtp.sent) == 1
     msg = smtp.sent[0]
     assert msg["From"] == "surxe.developer@gmail.com"
-    assert msg["To"] == "eethansur@gmail.com"
+    assert msg["To"] == "alerts@example.com"
     assert "1 game" in msg["Subject"]
     body = msg.get_content()
     assert "ARK: Survival Ascended" in body
@@ -152,18 +152,38 @@ def test_empty_batch_no_connection(tmp_path: Path):
     assert smtps == []
 
 
-def test_email_config_from_env():
-    assert EmailConfig.from_env({}) is None
-    assert EmailConfig.from_env({"STEAM_TRACKER_SMTP_USER": "x@y.com"}) is None
-    cfg = EmailConfig.from_env(
-        {
-            "STEAM_TRACKER_SMTP_USER": "x@y.com",
-            "STEAM_TRACKER_SMTP_PASSWORD": "pw",
-        }
+def _opts(**overrides):
+    """A stand-in for resolved OptionsConfig settings (only the fields read)."""
+    from types import SimpleNamespace
+
+    base = dict(
+        smtp_user=None,
+        smtp_password=None,
+        smtp_host="smtp.gmail.com",
+        smtp_port=587,
+        email_to=None,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_email_config_from_options():
+    # Off until user, password, AND recipient are all present (all three are
+    # secrets supplied via smtp.env; the recipient has no committed default).
+    assert EmailConfig.from_options(_opts()) is None
+    assert EmailConfig.from_options(
+        _opts(smtp_user="x@y.com", smtp_password="pw")
+    ) is None  # no recipient
+    assert EmailConfig.from_options(
+        _opts(smtp_user="x@y.com", email_to="to@z.com")
+    ) is None  # no password
+    cfg = EmailConfig.from_options(
+        _opts(smtp_user="x@y.com", smtp_password="pw", email_to="to@z.com")
     )
     assert cfg is not None
     assert cfg.user == "x@y.com" and cfg.password == "pw"
-    assert cfg.to_addr == "eethansur@gmail.com"  # config default
+    assert cfg.host == "smtp.gmail.com" and cfg.port == 587
+    assert cfg.to_addr == "to@z.com"
 
 
 def test_composite_fans_out():
