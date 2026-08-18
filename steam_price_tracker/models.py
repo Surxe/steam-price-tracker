@@ -22,6 +22,8 @@ class PriceOverview:
     final: int            # current price after discount, in cents
     discount_percent: int
     final_formatted: str
+    # Steam's formatted base price; empty when the app is not discounted.
+    initial_formatted: str = ""
 
     @property
     def final_amount(self) -> float:
@@ -33,6 +35,19 @@ class PriceOverview:
         """Base price as a major-unit float."""
         return self.initial / 100
 
+    @property
+    def base_formatted(self) -> str:
+        """Base price as a display string.
+
+        Steam only fills ``initial_formatted`` when the app is on sale; at full
+        price it is empty and ``final_formatted`` already *is* the base price.
+        """
+        return self.initial_formatted or self.final_formatted
+
+    @property
+    def is_discounted(self) -> bool:
+        return self.discount_percent > 0
+
     @classmethod
     def from_api(cls, data: dict) -> "PriceOverview":
         """Build from a raw Steam ``price_overview`` dict."""
@@ -42,6 +57,7 @@ class PriceOverview:
             final=data["final"],
             discount_percent=data["discount_percent"],
             final_formatted=data.get("final_formatted", ""),
+            initial_formatted=data.get("initial_formatted", ""),
         )
 
     def to_dict(self) -> dict:
@@ -51,6 +67,7 @@ class PriceOverview:
             "final": self.final,
             "discount_percent": self.discount_percent,
             "final_formatted": self.final_formatted,
+            "initial_formatted": self.initial_formatted,
         }
 
 
@@ -87,8 +104,17 @@ class PriceAlert:
     @property
     def message(self) -> str:
         who = self.name or f"app {self.app_id}"
+        price = self.price
+        if price.is_discounted:
+            # Steam does the discount math; we just report it.
+            detail = (
+                f"{price.final_formatted} "
+                f"({price.discount_percent}% off {price.base_formatted})"
+            )
+        else:
+            detail = f"{price.final_formatted} (no discount)"
         return (
-            f"[PRICE ALERT] {who}: {self.price.final_formatted} "
+            f"[PRICE ALERT] {who}: {detail} "
             f"is at or below your ${self.threshold:.2f} threshold"
         )
 
