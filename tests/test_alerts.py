@@ -96,6 +96,30 @@ def test_email_composes_and_authenticates(tmp_path: Path):
     assert state.last_emailed(2399830) == "2026-08-06"
 
 
+def test_email_shows_discount_math(tmp_path: Path):
+    """A discounted alert reports base, sale price, and Steam's discount %."""
+    smtps: list[FakeSMTP] = []
+    state = JsonAlertStateStore(tmp_path / "state.json")
+    alerter = EmailAlerter(
+        CFG, state, smtp_factory=_factory(smtps), today=lambda: "2026-08-06"
+    )
+    on_sale = PriceAlert(
+        app_id=2399830,
+        price=PriceOverview(
+            "USD", 4499, 2699, 40, "$26.99", initial_formatted="$44.99"
+        ),
+        threshold=30.0,
+        name="ARK: Survival Ascended",
+    )
+
+    assert alerter.try_send([on_sale]) is True
+
+    body = smtps[0].sent[0].get_content()
+    assert "$26.99" in body          # discounted price
+    assert "40% off" in body         # Steam's discount_percent
+    assert "$44.99" in body          # base price
+
+
 def test_email_deduped_same_day(tmp_path: Path):
     smtps: list[FakeSMTP] = []
     state = JsonAlertStateStore(tmp_path / "state.json")

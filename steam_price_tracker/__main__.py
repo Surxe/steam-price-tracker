@@ -84,7 +84,14 @@ def main(argv: list[str] | None = None) -> int:
     for app_id, price in sorted(results.items()):
         info = tracker.info_store.get(app_id)
         name = info.name if info else str(app_id)
-        print(f"{app_id} {name}: {price.final_formatted} ({price.currency})")
+        if price.is_discounted:
+            deal = (
+                f"{price.final_formatted} "
+                f"({price.discount_percent}% off {price.base_formatted})"
+            )
+        else:
+            deal = price.final_formatted
+        print(f"{app_id} {name}: {deal} ({price.currency})")
 
     # Non-zero exit if nothing succeeded.
     return 0 if results else 1
