@@ -44,39 +44,30 @@ do not reimplement search or config editing inline.
    "alert me when it's at or below $30". This per-app threshold is the whole point
    of using this over a Steam wishlist. It is optional; if they decline, skip it.
 
-4. **Register the confirmed choice.** The tracked-apps file is **owned by
-   my-system** (its source of truth is version-controlled there and deployed to
-   `~/.config/steam-price-tracker/` by `install.sh`), so edit that source copy —
-   not the tracker repo's gitignored `data/`. Point the registry at it via
-   `STEAM_TRACKER_APPS_PATH`. Pass the exact product name; include
-   `--threshold <usd>` only if the user gave one:
+4. **Register the confirmed choice** with the registry CLI. Pass the exact
+   product name; include `--threshold <usd>` only if the user gave one:
 
    ```bash
-   APPS=/srv/dev/repos/my-system/users/ethan/.config/steam-price-tracker/tracked_apps.json
-
    # without an alert
-   STEAM_TRACKER_APPS_PATH="$APPS" \
-     .venv/bin/python -m steam_price_tracker.registry add <app_id> --name "<full product name>"
+   .venv/bin/python -m steam_price_tracker.registry add <app_id> --name "<full product name>"
 
    # with an alert threshold in USD
-   STEAM_TRACKER_APPS_PATH="$APPS" \
-     .venv/bin/python -m steam_price_tracker.registry add <app_id> --name "<full product name>" --threshold <usd>
+   .venv/bin/python -m steam_price_tracker.registry add <app_id> --name "<full product name>" --threshold <usd>
    ```
 
-   This adds the id (and, if given, its threshold) to the my-system source file.
-   It is idempotent: if the id is already present it reports "already registered"
-   and changes nothing. Report the outcome. To add or change a threshold later,
-   use the same `STEAM_TRACKER_APPS_PATH` prefix with:
+   This writes to the tracked-apps file resolved from config —
+   `STEAM_TRACKER_APPS_PATH` if set (a deployment may version-control the list
+   outside this repo), otherwise the default `data/tracked_apps.json`. It is
+   idempotent: an already-present id reports "already registered" and changes
+   nothing. Report the outcome. To add or change a threshold later:
 
    ```bash
-   STEAM_TRACKER_APPS_PATH="$APPS" \
-     .venv/bin/python -m steam_price_tracker.registry set-threshold <app_id> <usd>
+   .venv/bin/python -m steam_price_tracker.registry set-threshold <app_id> <usd>
    ```
 
-   Because it edited a my-system source file, **remind the user to commit it in
-   my-system and re-run `install.sh`** — that deploys the updated list to
-   `~/.config/steam-price-tracker/`, where the refresh service reads it. Until
-   then the change is staged in the repo but not live. (Do not commit for them.)
+   If the deployment version-controls the list outside this repo (via
+   `STEAM_TRACKER_APPS_PATH`), remind the user to commit it there so the next
+   refresh picks it up. (Do not commit for them.)
 
 5. **Offer a first price fetch (optional).** Ask whether to pull an initial
    price now. If yes:

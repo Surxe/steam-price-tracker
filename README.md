@@ -116,13 +116,13 @@ them with:
 .venv/bin/python build.py
 ```
 
-> **On this deployment**, the non-secret settings and the tracked-apps file are
-> owned by [my-system](https://github.com/Surxe/my-system) and deployed to
-> `~/.config/steam-price-tracker/` (`options.conf` + `tracked_apps.json`); the
-> refresh service loads them via its unit's `EnvironmentFile`. Secrets stay in
-> the gitignored `smtp.env`. Edit the tracked list through the `/add-app` skill
-> (it targets the my-system source), then commit there and re-run `install.sh`.
-> `data/` in this repo holds only the app-metadata cache and alert-dedup state.
+> **Deployments** often keep the tracked-apps list and secrets outside this repo:
+> point `STEAM_TRACKER_APPS_PATH` at a version-controlled list elsewhere and supply
+> the secret vars via the scheduler's environment (e.g. a systemd `EnvironmentFile`),
+> so nothing sensitive and no per-deployment config lives in this repo. The repo's
+> `data/` then holds only the app-metadata cache and alert-dedup state. Edit the
+> tracked list with the `/add-app` skill — it writes wherever `STEAM_TRACKER_APPS_PATH`
+> resolves (default `data/tracked_apps.json`).
 
 <!-- BEGIN_GENERATED_OPTIONS -->
 #### Storage
@@ -249,14 +249,14 @@ STEAM_TRACKER_EMAIL_TO=your.recipient@example.com     # alert recipient
 
 Non-secret SMTP settings (`SMTP_HOST`/`SMTP_PORT`, default `smtp.gmail.com:587`
 STARTTLS) have defaults in the schema and rarely need changing. Keep the secret
-vars out of the repo — `*.env` is gitignored, and the real file lives in the
-running user's `~/.config/steam-price-tracker/smtp.env` (deployed by my-system;
-see [Auto-refresh prices on login](#auto-refresh-prices-on-login)).
+vars out of the repo — `*.env` is gitignored, and in a deployment the real values
+are supplied by the scheduler's environment (e.g. a systemd `EnvironmentFile`
+pointing at a secret file outside the repo; see [Scheduling](#scheduling)).
 
 ### Validate the credentials
 
 ```bash
-set -a; . ~/.config/steam-price-tracker/smtp.env; set +a
+set -a; . .env; set +a          # or source your deployment's secret file
 .venv/bin/python -m steam_price_tracker --test-email
 ```
 
@@ -274,26 +274,21 @@ subclass passed to `PriceTracker(alerter=...)`.
 The tests use in-memory fakes and temp files, so they hit neither the network
 nor the real `data/` stores.
 
-## Auto-refresh prices on login
+## Scheduling
 
-This repo is just the tracker. The auto-refresh wiring — a `systemd --user`
-oneshot that runs on login, plus a resume-from-sleep watcher — is owned and
-deployed by [my-system](https://github.com/Surxe/my-system) through its
-`install.sh`, not by this repo. The deployed units live at
-`~/.config/systemd/user/steam-price-refresh{,-resume-watch}.service` and call the
-review-gated wrappers in `~/.local/bin/` (sources:
-`users/ethan/localbin/steam-price-refresh` and `steam-price-resume-watch` in
-my-system). Those wrappers wait for connectivity, then run the CLI below — so
-there is nothing tracker-side to install for auto-refresh.
+This repo is just the tracker — it has no scheduler of its own. A deployment wires
+the refresh on whatever cadence suits it (a `systemd` timer, cron, a login/resume
+hook, …), pointing it at the CLI below and supplying the config + secrets via the
+environment (e.g. a systemd `EnvironmentFile`). There is nothing tracker-side to
+install for scheduling.
 
-To run a refresh yourself (exactly what the units ultimately call):
+To run a refresh yourself (exactly what a scheduled job ultimately calls):
 
 ```bash
 .venv/bin/python -m steam_price_tracker
 ```
 
-Credentials come from the unit's `EnvironmentFile` (`~/.config/steam-price-tracker/smtp.env`);
-see [Email alerts](#email-alerts).
+Credentials come from the environment; see [Email alerts](#email-alerts).
 
 ## Notes
 
