@@ -18,10 +18,33 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from . import config
+from .client import PriceSource, SteamStoreClient
+from .exceptions import PriceUnavailableError, SteamAPIError
+from .models import PriceOverview
 
 
 class RegistryError(Exception):
     """Raised when the tracked-apps file cannot be read or edited."""
+
+
+def verify_priceable(
+    app_id: int, source: Optional[PriceSource] = None
+) -> Optional[PriceOverview]:
+    """Probe Steam for a current US price for ``app_id``.
+
+    Returns the :class:`PriceOverview` when Steam lists a static US price, or
+    ``None`` when it does not — i.e. the app is free, unreleased, region-locked,
+    or a dynamic "complete the set" bundle whose price is computed per-account
+    (Steam returns ``"data": []`` for these). Such an app can be tracked but
+    will never yield a price or fire an alert, so callers use this to refuse or
+    warn before registering it. Transport/protocol failures propagate as
+    :class:`SteamAPIError`, since those are "unknown", not "no price".
+    """
+    source = source or SteamStoreClient()
+    try:
+        return source.fetch_price(app_id)
+    except PriceUnavailableError:
+        return None
 
 
 def read_tracked_ids(apps_path: str | Path | None = None) -> List[int]:
@@ -93,6 +116,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=float,
         help="optional USD price-alert threshold (alerts at or below it)",
     )
+    p_add.add_argument(
+        "--force",
+        action="store_true",
+        help="register even if Steam lists no US price for the app (skips the "
+        "priceability check; the app is tracked but will never alert)",
+    )
 
     p_thr = sub.add_parser("set-threshold", help="set an app's alert threshold")
     p_thr.add_argument("app_id", type=int)
@@ -109,6 +138,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.command == "add":
+        if not args.force:
+            try:
+                price = verify_priceable(args.app_id)
+            except SteamAPIError as exc:
+                # Could not reach/parse Steam — don't block on a transient
+                # failure; register but make the unverified state explicit.
+                print(
+                    f"Warning: could not verify a price for {args.app_id} "
+                    f"({exc}); registering anyway.",
+                    file=sys.stderr,
+                )
+            else:
+                if price is None:
+                    print(
+                        f"Refusing to register {args.app_id}: Steam lists no "
+                        f"US price for it (free, unreleased, region-locked, or "
+                        f"a dynamic 'complete the set' bundle), so the tracker "
+                        f"can never price it or alert on it. Re-run with "
+                        f"--force to track it anyway.",
+                        file=sys.stderr,
+                    )
+                    return 3
+                print(f"Steam price for {args.app_id}: {price.final_formatted}.")
         added = add_tracked_id(args.app_id, args.name)
         if added:
             label = f" ({args.name})" if args.name else ""
