@@ -57,9 +57,21 @@ do not reimplement search or config editing inline.
 
    This writes to the tracked-apps file resolved from config —
    `STEAM_TRACKER_APPS_PATH` if set (a deployment may version-control the list
-   outside this repo), otherwise the default `data/tracked_apps.json`. It is
-   idempotent: an already-present id reports "already registered" and changes
-   nothing. Report the outcome. To add or change a threshold later:
+   outside this repo), otherwise the default `data/tracked_apps.json`.
+
+   **Priceability guard.** `add` first probes Steam for a current US price. If
+   there is one it prints it and proceeds; if Steam lists **no** US price —
+   free, unreleased, region-locked, or a dynamic "complete the set" bundle
+   (Steam returns `"data": []`) — it **refuses and exits 3 without
+   registering**, since such an app can be tracked but never prices or alerts.
+   Surface that to the user; add `--force` only if they want it tracked anyway:
+
+   ```bash
+   .venv/bin/python -m steam_price_tracker.registry add <app_id> --name "<full product name>" --force
+   ```
+
+   It is idempotent: an already-present id reports "already registered" and
+   changes nothing. Report the outcome. To add or change a threshold later:
 
    ```bash
    .venv/bin/python -m steam_price_tracker.registry set-threshold <app_id> <usd>

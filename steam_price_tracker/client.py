@@ -84,7 +84,13 @@ class SteamStoreClient(StoreFront):
         entry = payload.get(str(app_id))
         if not entry or not entry.get("success"):
             raise SteamAPIError(f"Steam reported failure for app {app_id}")
-        return entry.get("data", {})
+        # Steam returns "data": [] (an empty JSON array) instead of an object
+        # when the app has nothing to report for the requested filter — e.g. a
+        # free/unreleased/region-locked app with no price, or a dynamic
+        # "complete the set" DLC bundle whose price is computed per-account.
+        # Normalize any non-object payload to {} so callers can always .get().
+        data = entry.get("data")
+        return data if isinstance(data, dict) else {}
 
     def fetch_price(self, app_id: int) -> PriceOverview:
         data = self._request(app_id, filters="price_overview")
